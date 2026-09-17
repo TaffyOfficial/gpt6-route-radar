@@ -143,4 +143,37 @@ test('lookup-only channels receive current model status too', () => {
   const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'low',models:[{model:'gpt-6-astra',success_rate:97,request_count:50,cache_hit_rate:80}]}]});
   assert.equal(updated.lookupRows[0].success,97);assert.equal(updated.rows.length,0);
 });
+test('model selection isolates rankings, search, blacklist and exported IDs', () => {
+  const opus = 'claude-opus-5', sol = 'gpt-5.6-sol';
+  const s = { ...snap([make({id:'gpt'})]), modelSnapshots: {
+    [opus]: {...snap([make({id:'cc',model:opus,source:'CC-Max'})]),model:opus},
+    [sol]: {...snap([make({id:'sol',model:sol}), make({id:'plus',model:sol,source:'Codex Plus'})]),model:sol}
+  }};
+  assert.deepEqual(rank(s,{model:opus},now).rows.map(r=>r.id),['cc']);
+  assert.deepEqual(rank(s,{model:sol},now).rows.map(r=>r.id),['sol']);
+  assert.equal(rank(s,{},now).rows[0].id,'gpt');
+  const p = plan(s,{model:opus},now);
+  assert.equal(p.model,opus); assert.equal(p.source,null); assert.equal(p.channels[0].source,'CC-Max');
+  assert.equal(search(s,rank(s,{model:opus},now),'test').outside.length,0);
+  assert.equal(rank(s,{model:opus,blockedKeys:['group:cc']},now).rows.length,0);
+  assert.equal(rank(s,{model:'claude-sonnet-5'},now).rows.length,0);
+  assert.throws(()=>plan(s,{model:'claude-sonnet-5'},now),/刷新/);
+});
+test('live refresh updates each model without borrowing another model metrics', () => {
+  const opus='claude-opus-5', fable='claude-fable-5-1';
+  const s={...snap([make()]),modelSnapshots:{
+    [opus]:{...snap([make({model:opus,source:'CC-Max'})]),model:opus},
+    [fable]:{...snap([make({model:fable,source:'CC-Max'})]),model:fable}
+  }};
+  const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'a',models:[
+    {model:'gpt-6-astra',success_rate:99,request_count:200,cache_hit_rate:80},
+    {model:opus,success_rate:40,request_count:30,cache_hit_rate:10,status:'failed'}
+  ]}]});
+  assert.equal(updated.rows[0].success,99);
+  assert.equal(updated.modelSnapshots[opus].rows[0].success,40);
+  assert.equal(updated.modelSnapshots[opus].rows[0].cache,10);
+  assert.equal(updated.modelSnapshots[fable].rows[0].success,null);
+  assert.equal(updated.modelSnapshots[fable].rows[0].modelRequests,0);
+  assert.equal(rank(updated,{model:opus},now+1000).eligible.length,0);
+});
 console.log(`${tests} tests passed`);

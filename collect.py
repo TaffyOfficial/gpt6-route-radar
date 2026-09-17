@@ -10,13 +10,20 @@ import urllib.request
 
 BASE = 'https://shu26.cfd'
 MODEL = 'gpt-6-astra'
+MODELS = {
+    MODEL: 'Codex Pro',
+    'claude-opus-5': None,
+    'claude-sonnet-5': None,
+    'claude-fable-5-1': None,
+    'gpt-5.6-sol': 'Codex Pro',
+}
 MIN_MULTIPLIER = .20
 ROOT = Path(__file__).resolve().parent
 
 
-def status_fields(status, models):
+def status_fields(status, models, model=MODEL):
     by_model = {m['model']: m for m in status.get('models', [])}
-    m = by_model.get(MODEL, {})
+    m = by_model.get(model, {})
     windows = {item.get('sample_window') for item in by_model.values() if item.get('sample_window') is not None}
     return {
         'modelStatus': m.get('status', 'unknown'),
@@ -45,27 +52,30 @@ def get_json(path):
     return result
 
 
-def group_path(page):
-    return '/api/marketplace/groups?' + urllib.parse.urlencode({'source': 'Codex Pro', 'model': MODEL, 'window_hours': 24, 'page': page, 'page_size': 20})
+def group_path(page, model=MODEL):
+    params = {'model': model, 'window_hours': 24, 'page': page, 'page_size': 20}
+    if MODELS[model]:
+        params['source'] = MODELS[model]
+    return '/api/marketplace/groups?' + urllib.parse.urlencode(params)
 
 
-def normalize(groups, statuses, pricing, site, captured_at=None):
+def normalize(groups, statuses, pricing, site, captured_at=None, model=MODEL):
     status_map = {row['group_id']: row for row in statuses['data']}
     quota = site['data'].get('quota_per_unit')
     if not isinstance(quota, (int, float)) or quota <= 0:
         raise ValueError('Missing quota_per_unit; refusing to guess billing units')
-    price = next((m for m in pricing.get('priced_model_details', []) if m['model_name'] == MODEL), None)
+    price = next((m for m in pricing.get('priced_model_details', []) if m['model_name'] == model), None)
     result = []
     for g in groups:
-        if g.get('source_label') != 'Codex Pro' or MODEL not in g.get('models', []):
+        if (MODELS[model] and g.get('source_label') != MODELS[model]) or model not in g.get('models', []):
             continue
         status = status_map.get(g['id'], {})
-        m = next((m for m in status.get('models', []) if m.get('model') == MODEL), {})
-        tested = next((m for m in g.get('model_verification_results', []) if m.get('model') == MODEL), {})
-        raw_cost = g.get('avg_consumer_amount_by_model', {}).get(MODEL)
+        m = next((m for m in status.get('models', []) if m.get('model') == model), {})
+        tested = next((m for m in g.get('model_verification_results', []) if m.get('model') == model), {})
+        raw_cost = g.get('avg_consumer_amount_by_model', {}).get(model)
         result.append({
             'id': g['id'], 'channelId': g.get('channel_id'), 'name': g['system_display_name'],
-            'source': g['source_label'], 'model': MODEL, 'models': list(dict.fromkeys(g.get('models', []))), 'multiplier': g['multiplier'],
+            'source': g['source_label'], 'model': model, 'models': list(dict.fromkeys(g.get('models', []))), 'multiplier': g['multiplier'],
             'lifecycle': g.get('lifecycle_status'), 'verified': g.get('verification_status') == 'passed' and tested.get('status') == 'passed' and tested.get('listed') is True,
             'observing': g.get('observing', True), 'modelStatus': m.get('status', 'unknown'),
             'modelRequests': m.get('request_count', 0), 'modelWindowHours': m.get('sample_window'),
@@ -76,28 +86,29 @@ def normalize(groups, statuses, pricing, site, captured_at=None):
             'historicalCost': raw_cost / quota if isinstance(raw_cost, (int, float)) and math.isfinite(raw_cost) and raw_cost > 0 else None,
             'maxConcurrency': g.get('max_concurrency'), 'currentConcurrency': g.get('current_concurrency'),
             'series': m.get('series', []), 'seriesWindowHours': m.get('series_window'),
-            **status_fields(status, list(dict.fromkeys(g.get('models', [])))),
+            **status_fields(status, list(dict.fromkeys(g.get('models', []))), model),
         })
     timestamp = captured_at or datetime.now(timezone.utc).isoformat()
     rows = [r for r in result if isinstance(r['multiplier'], (int, float)) and r['multiplier'] >= MIN_MULTIPLIER]
     lookup_rows = [r for r in result if r not in rows]
     return {
         'schemaVersion': 2, 'capturedAt': timestamp, 'liveCapturedAt': timestamp,
-        'model': MODEL, 'source': 'Codex Pro', 'minMultiplier': MIN_MULTIPLIER,
+        'model': model, 'source': MODELS[model], 'minMultiplier': MIN_MULTIPLIER,
         'marketTotal': len(groups), 'count': len(rows), 'complete': True,
         'pricing': price, 'quotaPerUnit': quota, 'currency': 'USD platform quota',
-        'sources': [BASE + group_path(1), BASE + '/api/group-status', BASE + '/api/pricing', BASE + '/api/status'],
+        'sources': [BASE + group_path(1, model), BASE + '/api/group-status', BASE + '/api/pricing', BASE + '/api/status'],
         'rows': rows, 'lookupRows': lookup_rows,
     }
 
 
-def collect():
+def collect(model=MODEL, shared=None):
     # All pages must succeed before replacing the last good snapshot.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {name: pool.submit(get_json, path) for name, path in {
-            'first': group_path(1), 'statuses': '/api/group-status', 'pricing': '/api/pricing', 'site': '/api/status'
-        }.items()}
-        responses = {name: future.result() for name, future in futures.items()}
+        paths = {'first': group_path(1, model)}
+        if shared is None:
+            paths.update(statuses='/api/group-status', pricing='/api/pricing', site='/api/status')
+        futures = {name: pool.submit(get_json, path) for name, path in paths.items()}
+        responses = {**(shared or {}), **{name: future.result() for name, future in futures.items()}}
         first = responses['first']['data']
         total, size = first['total'], first['page_size']
         if not isinstance(size, int) or size <= 0 or not isinstance(total, int) or total < 0:
@@ -106,7 +117,7 @@ def collect():
         # No channel-count ceiling; at most four page requests are in flight.
         pages = math.ceil(total / size)
         for start in range(2, pages + 1, 4):
-            pending = [pool.submit(get_json, group_path(page)) for page in range(start, min(start + 4, pages + 1))]
+            pending = [pool.submit(get_json, group_path(page, model)) for page in range(start, min(start + 4, pages + 1))]
             for future in pending:
                 page = future.result()['data']
                 if page['total'] != total:
@@ -114,7 +125,21 @@ def collect():
                 groups.extend(page['items'])
     if len(groups) != total or len({g['id'] for g in groups}) != total:
         raise ValueError('Incomplete or duplicate market pages; previous snapshot retained')
-    return normalize(groups, responses['statuses'], responses['pricing'], responses['site'])
+    return normalize(groups, responses['statuses'], responses['pricing'], responses['site'], responses.get('capturedAt'), model)
+
+
+def collect_all():
+    # Share status and billing responses; publish only after every model succeeds.
+    captured_at = datetime.now(timezone.utc).isoformat()
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {name: pool.submit(get_json, path) for name, path in {
+            'statuses': '/api/group-status', 'pricing': '/api/pricing', 'site': '/api/status'
+        }.items()}
+        shared = {name: future.result() for name, future in futures.items()}
+    shared['capturedAt'] = captured_at
+    snapshots = {model: collect(model, shared) for model in MODELS}
+    default = snapshots.pop(MODEL)
+    return {**default, 'modelSnapshots': snapshots}
 
 
 def save(snapshot):
@@ -127,6 +152,6 @@ def save(snapshot):
 
 
 if __name__ == '__main__':
-    snapshot = collect()
+    snapshot = collect_all()
     save(snapshot)
     print(f"Collected {snapshot['count']} matching channels at {snapshot['capturedAt']}")
