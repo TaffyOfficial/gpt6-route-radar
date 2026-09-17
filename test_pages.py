@@ -1,0 +1,35 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+import build_pages
+
+
+class PagesTests(unittest.TestCase):
+    def test_only_public_allowlisted_assets_are_published(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'source'
+            root.mkdir()
+            for name in build_pages.PUBLIC_FILES:
+                (root / name).write_text('{}', encoding='utf-8')
+            (root / 'snapshot.json').write_text(json.dumps({'schemaVersion': 2, 'complete': True, 'count': 1, 'capturedAt': '2026-09-17T00:00:00Z'}))
+            (root / 'server.py').write_text('private server source')
+            (root / '.env').write_text('example secret')
+            destination = Path(temporary) / 'public'
+            with patch.object(build_pages, 'ROOT', root):
+                build_pages.build(destination, refresh=False)
+            self.assertEqual({p.name for p in destination.iterdir()}, set(build_pages.PUBLIC_FILES) | {'runtime.js', '.nojekyll'})
+            self.assertIn('"mode": "static"', (destination / 'runtime.js').read_text())
+
+    def test_build_fails_closed_without_valid_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'snapshot.json').write_text('{"complete":false,"schemaVersion":2}')
+            with patch.object(build_pages, 'ROOT', root):
+                with self.assertRaisesRegex(ValueError, 'incomplete'):
+                    build_pages.build(root / 'public', refresh=False)
+
+
+if __name__ == '__main__':
+    unittest.main()

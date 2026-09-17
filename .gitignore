@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+snapshot.json
+snapshot.js
+snapshot.tmp
+route-plan.json
+dist/
+.env
+.env.*
+node_modules/
+*.log
