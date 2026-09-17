@@ -30,7 +30,7 @@ test('failed channel historical spend does not alter healthy ranking', () => {
   assert.equal(a, b);
 });
 test('historical spend capped at normalized 10%', () => assert.throws(() => rank(snap([make()]), { weights: { price: 1, ttft: 1, cache: 1, cost: 10 } }, now), /10%/));
-test('invalid zero total is rejected', () => assert.throws(() => rank(snap([make()]), { weights: { price: 0, ttft: 0, cache: 0, cost: 0 } }, now), /至少/));
+test('invalid zero total is rejected', () => assert.throws(() => rank(snap([make()]), { weights: { price: 0, ttft: 0, cache: 0, effective: 0, cost: 0 } }, now), /至少/));
 test('stale, future, invalid and partial snapshots cannot export routes', () => {
   for (const changes of [{ capturedAt: new Date(now - 600001).toISOString() }, { capturedAt: 'invalid' }, { capturedAt: new Date(now + 120000).toISOString() }, { complete: false }]) assert.throws(() => plan({ ...snap([make()]), ...changes }, {}, now), /刷新/);
 });
@@ -47,7 +47,7 @@ test('all-channel ranking retains low success and low sample channels with score
 test('even the best observation score stays below the weakest eligible channel', () => {
   const changes = [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { observing: true }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
   const s = snap([make({ id: 'eligible', cache: 0 }), ...changes.map((change, i) => make({ id: 'excluded-' + i, cache: 100, ...change }))]);
-  const r = rank(s, { weights: { price: 0, ttft: 0, cache: 100, cost: 0 } }, now);
+  const r = rank(s, { weights: { price: 0, ttft: 0, cache: 100, effective: 0, cost: 0 } }, now);
   assert.equal(r.rows[0].id, 'eligible'); assert.equal(r.rows[0].score, 50);
   assert.ok(r.excluded.every(row => row.score >= 0 && row.score <= 49 && row.reasons.length > 0));
   assert.equal(r.excluded[0].baseScore, 100); assert.equal(r.excluded[0].score, 49);
@@ -56,12 +56,12 @@ test('even the best observation score stays below the weakest eligible channel',
 test('fixed bands retain weighted base score, ordering and exact score-bar contributions', () => {
   const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', success: 90 })]), {}, now);
   assert.deepEqual(r.rows.map(row => row.id), ['a', 'b', 'c']);
-  assert.equal(r.rows[0].baseScore, 78.75); assert.equal(r.rows[0].score, 89.375);
+  assert.equal(r.rows[0].baseScore, 76.5); assert.equal(r.rows[0].score, 88.25);
   assert.equal(r.rows[2].score, r.rows[2].baseScore * .49);
   for (const row of r.rows) assert.ok(Math.abs(Object.values(row.scoreContributions).reduce((a, b) => a + b, 0) - row.score) < 1e-10);
   const p = plan(snap([make()]), {}, now);
   assert.equal(p.scoring.method, 'eligibility_bands_v1');
-  assert.equal(p.channels[0].baseScore, 78.75); assert.equal(p.channels[0].score, 89.375);
+  assert.equal(p.channels[0].baseScore, 76.5); assert.equal(p.channels[0].score, 88.25);
 });
 test('observation bands stay fixed when other channels or recommendation filters change', () => {
   const observation = make({ id: 'watch', observing: true, historicalCost: null });
@@ -175,5 +175,36 @@ test('live refresh updates each model without borrowing another model metrics', 
   assert.equal(updated.modelSnapshots[fable].rows[0].success,null);
   assert.equal(updated.modelSnapshots[fable].rows[0].modelRequests,0);
   assert.equal(rank(updated,{model:opus},now+1000).eligible.length,0);
+});
+test('cache-adjusted multiplier uses fractional hit rate and changes ranking with its weight', () => {
+  const s = snap([make({id:'cheap-low-cache',multiplier:.2,cache:40}), make({id:'better',multiplier:.3,cache:90})]);
+  const input = {weights:{price:0,ttft:0,cache:0,effective:100,cost:0}};
+  const r = rank(s,input,now);
+  assert.equal(r.rows[0].id,'better');
+  assert.ok(Math.abs(r.rows[0].effectiveMultiplier-1/3)<1e-12);
+  assert.equal(r.rows[1].effectiveMultiplier,.5);
+  assert.equal(r.rows[1].components.effective,40);
+  assert.equal(rank(s,{weights:{price:100,ttft:0,cache:0,effective:0,cost:0}},now).rows[0].id,'cheap-low-cache');
+  assert.equal(rank(snap([make({cache:80})]),{},now).rows[0].effectiveMultiplier,.25);
+  const p = plan(s,input,now);
+  assert.equal(p.channels[0].effectiveMultiplier,r.rows[0].effectiveMultiplier);
+  assert.equal(p.channels[0].cacheHitRate,90);
+});
+test('zero or invalid cache never gains adjusted-price points or nonfinite exports', () => {
+  for (const cache of [0,null,-1,101,NaN]) {
+    const r = rank(snap([make({cache})]),{},now).rows[0];
+    assert.equal(r.effectiveMultiplier,null); assert.equal(r.components.effective,0);
+    assert.ok(Number.isFinite(r.score));
+  }
+  const p = plan(snap([make({cache:0})]),{},now);
+  assert.equal(JSON.parse(JSON.stringify(p)).channels[0].effectiveMultiplier,null);
+});
+test('live cache updates and model selection recalculate adjusted multipliers', () => {
+  const model='claude-opus-5';
+  const s={...snap([make({cache:80})]),modelSnapshots:{[model]:{...snap([make({model,source:'CC-Max',cache:40})]),model}}};
+  assert.equal(rank(s,{model},now).rows[0].effectiveMultiplier,.5);
+  const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'a',models:[{model,cache_hit_rate:50}]}]});
+  assert.equal(rank(updated,{model},now+1000).rows[0].effectiveMultiplier,.4);
+  assert.equal(rank(updated,{},now+1000).rows[0].effectiveMultiplier,null);
 });
 console.log(`${tests} tests passed`);

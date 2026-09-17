@@ -16,9 +16,13 @@
     if ((snapshot.model || defaults.model) === model) return snapshot;
     return snapshot.modelSnapshots?.[model] || { ...snapshot, model, source: modelInfo(model)?.source, rows: [], lookupRows: [], count: 0, complete: false, modelSnapshots: undefined };
   }
-  const defaults = { model: 'gpt-6-astra', minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 35, ttft: 35, cache: 25, cost: 5 } };
+  const defaults = { model: 'gpt-6-astra', minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 20, ttft: 35, cache: 15, effective: 25, cost: 5 } };
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function effectiveMultiplier(row) {
+    return finite(row.multiplier) && row.multiplier > 0 && finite(row.cache) && row.cache > 0 && row.cache <= 100
+      ? row.multiplier / (row.cache / 100) : null;
+  }
   function applyStatus(snapshot, response) {
     if (!Array.isArray(response.data) || !Number.isFinite(Date.parse(response.capturedAt))) throw Error('官方状态响应格式无效');
     if (Date.parse(response.capturedAt) < Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt)) return snapshot;
@@ -85,7 +89,7 @@
       if (!finite(r[c.ttftMetric]) || r[c.ttftMetric] <= 0 || !finite(r.ttftSamples) || r.ttftSamples <= 0) reasons.push('缺少有效 TTFT');
       if (!finite(r.cache) || r.cache < 0 || r.cache > 100) reasons.push('缺少有效缓存统计');
       if (finite(r.maxConcurrency) && r.maxConcurrency > 0 && finite(r.currentConcurrency) && r.currentConcurrency >= r.maxConcurrency) reasons.push('并发已满');
-      return { ...r, reasons, eligible: reasons.length === 0, latency: r[c.ttftMetric] };
+      return { ...r, reasons, eligible: reasons.length === 0, latency: r[c.ttftMetric], effectiveMultiplier: effectiveMultiplier(r) };
     });
     // Reference minimum uses eligible channels only; missing / zero spend never earns a free-price bonus.
     const observed = rows.filter(r => r.eligible && finite(r.historicalCost) && r.historicalCost > 0).map(r => r.historicalCost);
@@ -93,6 +97,7 @@
     for (const r of rows) {
       r.components = {
         price: 100 * clamp(defaults.minMultiplier / r.multiplier, 0, 1),
+        effective: r.effectiveMultiplier != null ? 100 * clamp(defaults.minMultiplier / r.effectiveMultiplier, 0, 1) : 0,
         ttft: finite(r.latency) && r.latency > 0 ? 100 / (1 + r.latency / 10000) : 0,
         cache: finite(r.cache) ? clamp(r.cache, 0, 100) : 0,
         cost: costMin && finite(r.historicalCost) && r.historicalCost > 0 ? 100 * clamp(costMin / r.historicalCost, 0, 1) : 0
@@ -131,7 +136,7 @@
       else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于最低倍率 ${result.config.minMultiplier}×`);
       if (target.source && r.source !== target.source) reasons.push(`不是 ${target.source} 渠道`);
       if (r.model !== target.id) reasons.push(`未列出 ${target.id}`);
-      return { ...r, overallRank: null, blockKey, reasons };
+      return { ...r, effectiveMultiplier: effectiveMultiplier(r), overallRank: null, blockKey, reasons };
     });
     return { rows, outside };
   }
@@ -140,7 +145,7 @@
     snapshot = selectSnapshot(snapshot, result.config.model);
     if (result.stale) throw Error(result.config.freshnessProfile === 'scheduled' ? '线上快照超过 20 分钟或不完整，请刷新或等待下次采集' : '行情超过 10 分钟、成功率超过 3 分钟或数据不完整，请先刷新');
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
-    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: modelInfo(result.config.model).source, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...result.config, method: 'eligibility_bands_v1', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
+    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: modelInfo(result.config.model).source, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...result.config, method: 'eligibility_bands_v1', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
-  return { models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
+  return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
 });

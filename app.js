@@ -3,9 +3,9 @@
   const $ = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const format = (v, digits = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : '—';
-  const keys = ['price', 'ttft', 'cache', 'cost'];
-  const labels = { price: '价格', ttft: 'TTFT', cache: '缓存', cost: '模型实扣' };
-  const presetWeights = { balanced: [35, 35, 25, 5], fast: [20, 55, 20, 5], cheap: [60, 20, 15, 5] };
+  const keys = ['price', 'ttft', 'cache', 'effective', 'cost'];
+  const labels = { price: '价格', ttft: 'TTFT', cache: '缓存', effective: '缓存折算倍率', cost: '模型实扣' };
+  const presetWeights = { balanced: [20, 35, 15, 25, 5], fast: [10, 55, 10, 20, 5], cheap: [20, 15, 10, 50, 5] };
   let snapshot = window.ROUTER_SNAPSHOT;
   const requestedModel = new URLSearchParams(location.search).get('model');
   let selectedModel = RouterRank.modelInfo(requestedModel) ? requestedModel : RouterRank.defaults.model;
@@ -32,7 +32,7 @@
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   let undoKey = null;
   let searchQuery = new URLSearchParams(location.search).get('q') || '';
-  let weights = { price: 35, ttft: 35, cache: 25, cost: 5 };
+  let weights = { ...RouterRank.defaults.weights };
   const online = /^https?:$/.test(location.protocol);
   const staticHosting = online && (window.ROUTER_RUNTIME?.mode === 'static' || !['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname));
   const localServer = online && !staticHosting;
@@ -41,6 +41,7 @@
   const stamp = t => new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const windowLabel = h => h == null ? '窗口未标注' : `近 ${h}h`;
   const statusLabel = s => ({healthy:'正常',unstable:'波动',failed:'故障',unknown:'无样本'}[s] || '未知');
+  const effectiveLabel = r => r.cache === 0 ? '∞' : format(r.effectiveMultiplier, 3);
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
@@ -94,7 +95,7 @@
       ? `榜内 ${found.rows.length} 条 · 未上榜 ${found.outside.length} 条。名次为当前权重下的完整榜单排名。`
       : `当前快照未找到该渠道。搜索范围为官方市场收录的 ${modelLabel()} 渠道；下架或未公开的渠道可能不在其中。`;
     $('search-outside').hidden = !searching || !found.outside.length;
-    $('search-outside').innerHTML = found.outside.map(r => `<article class="lookup-card"><div class="lookup-heading"><h3>${escape(r.name)}</h3><span class="tag warning">未上榜</span></div><p class="lookup-reason">${escape(r.reasons.join('；') || '不符合当前榜单范围')}，不参与排名与推荐。</p><p>${escape(modelLabel())} 成功率 ${percent(r.success)} · ${windowLabel(r.modelWindowHours)} / ${escape(r.modelRequests ?? 0)} 次 · 缓存 ${percent(r.cache)}</p><p>平均 TTFT ${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + 's' : '—'}（全模型近 24h） · ${escape(modelLabel())} 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens</p>${modelTags(r)}${r.blockKey ? `<button class="button" type="button" data-search-restore="${escape(r.blockKey)}">恢复此渠道</button>` : ''}</article>`).join('');
+    $('search-outside').innerHTML = found.outside.map(r => `<article class="lookup-card"><div class="lookup-heading"><h3>${escape(r.name)}</h3><span class="tag warning">未上榜</span></div><p class="lookup-reason">${escape(r.reasons.join('；') || '不符合当前榜单范围')}，不参与排名与推荐。</p><p>${escape(modelLabel())} 成功率 ${percent(r.success)} · ${windowLabel(r.modelWindowHours)} / ${escape(r.modelRequests ?? 0)} 次 · 缓存 ${percent(r.cache)}</p><p>缓存折算倍率 ${effectiveLabel(r)}× · 倍率 ÷ 缓存命中率</p><p>平均 TTFT ${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + 's' : '—'}（全模型近 24h） · ${escape(modelLabel())} 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens</p>${modelTags(r)}${r.blockKey ? `<button class="button" type="button" data-search-restore="${escape(r.blockKey)}">恢复此渠道</button>` : ''}</article>`).join('');
     $('search-outside').querySelectorAll('[data-search-restore]').forEach(b => b.addEventListener('click', () => restoreChannel(b.dataset.searchRestore)));
     return found;
   }
@@ -109,12 +110,13 @@
     // Cost has a hard percentage cap; distribute the remaining percentage over the other dimensions.
     if (changed === 'cost') {
       weights.cost = Math.max(0, Math.min(10, next));
-      const total = weights.price + weights.ttft + weights.cache;
-      for (const k of ['price', 'ttft', 'cache']) weights[k] = (total ? weights[k] / total : 1 / 3) * (100 - weights.cost);
+      const adjustable = keys.filter(k => k !== 'cost');
+      const total = adjustable.reduce((sum, k) => sum + weights[k], 0);
+      for (const k of adjustable) weights[k] = (total ? weights[k] / total : 1 / adjustable.length) * (100 - weights.cost);
     } else {
       const available = 100 - weights.cost;
       weights[changed] = Math.min(next, available);
-      const rest = ['price', 'ttft', 'cache'].filter(k => k !== changed);
+      const rest = keys.filter(k => k !== 'cost' && k !== changed);
       const total = rest.reduce((a, k) => a + weights[k], 0);
       for (const k of rest) weights[k] = (total ? weights[k] / total : 1 / rest.length) * (available - weights[changed]);
     }
@@ -154,7 +156,7 @@
     const top = result.eligible[0];
     if (top) {
       $('recommend-title').textContent = top.name;
-      $('recommend-copy').textContent = `综合 ${format(top.score)} 分 · ${format(top.multiplier, 3).replace(/0+$/, '').replace(/\.$/, '')}× 倍率 · 首字 ${format(top.latency / 1000)}s · ${escape(modelLabel())} 缓存 ${format(top.cache)}%`;
+      $('recommend-copy').textContent = `综合 ${format(top.score)} 分 · ${format(top.multiplier, 3).replace(/0+$/, '').replace(/\.$/, '')}× 倍率 · 缓存折算 ${effectiveLabel(top)}× · 首字 ${format(top.latency / 1000)}s · ${escape(modelLabel())} 缓存 ${format(top.cache)}%`;
       $('route-chain').innerHTML = result.eligible.slice(0, 3).map((r, i) => `${i ? '<span class="route-arrow" aria-hidden="true">→</span>' : ''}<div class="route-item"><span>${['首选', '备用 1', '备用 2'][i]}</span><b>${escape(r.channelId)} 号渠道</b></div>`).join('');
     } else {
       $('rec-state').textContent = '暂无入选';
@@ -182,8 +184,8 @@
     $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
       <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
       <td><span class="score-value${r.eligible ? '' : ' score-downgraded'}" title="基础分 ${format(r.baseScore)}；${r.eligible ? '通过门槛：50 + 基础分 × 0.5' : '未通过门槛：基础分 × 0.49'}">${format(r.score)}</span>${r.eligible ? '' : '<small class="metric-note score-downgraded">已降分</small>'}<div class="score-bar" aria-hidden="true">${['gate', ...keys].map(k => `<span class="${k}" style="width:${r.scoreContributions[k]}%"></span>`).join('')}</div></td>
-      <td>${escape(r.multiplier)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
-      <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="8"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
+      <td>${escape(r.multiplier)}<span class="number-muted"> ×</span></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
+      <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
     $('rows').querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => { selected = b.dataset.id; render(); }));
     $('rows').querySelectorAll('[data-block]').forEach(b => b.addEventListener('click', () => blockChannel(b.dataset.block)));
     renderPagination();
@@ -206,7 +208,7 @@
     $('detail').hidden = !r || tab === 'blacklist' || !RouterRank.matchesQuery(r, searchQuery);
     if ($('detail').hidden) return;
     $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p><p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${escape(modelLabel())} 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
-      <div class="detail-grid"><div><label>${escape(modelLabel())} 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>${escape(modelLabel())} 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
+      <div class="detail-grid"><div><label>缓存折算倍率 / 越低越好</label><b>${effectiveLabel(r)}×</b><p>${escape(r.multiplier)} ÷ ${percent(r.cache)}；比较指标，非实际账单倍率。</p></div><div><label>${escape(modelLabel())} 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>${escape(modelLabel())} 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown"><span>基础分 ${format(r.baseScore)}：</span>${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
       <div class="table-wrap model-status-table"><table><thead><tr><th>模型</th><th>当前状态</th><th>最新成功率</th><th>请求数</th><th>统计窗口</th><th>缓存命中率</th></tr></thead><tbody>${(r.modelStats || (r.models || [r.model]).map(model => ({model}))).map(m => `<tr><td>${escape(m.model)}</td><td>${statusLabel(m.status)}</td><td>${percent(m.success)}</td><td>${escape(m.requests ?? 0)}</td><td>${windowLabel(m.windowHours)}</td><td>${percent(m.cache)}</td></tr>`).join('')}</tbody></table></div><div class="group-id">${escape(r.id)}</div>`;

@@ -16,3 +16,5 @@
 .gate{background:#a4adb8}.score-bar{gap:0;background:#edf1ef}.score-bar>span{flex-shrink:0}.score-downgraded{color:#946c32}
 
 .model-picker{grid-column:1/-1;padding-bottom:20px;margin-bottom:20px;border-bottom:1px solid var(--line)}.model-picker .input-label{margin-top:0}.model-picker select{font-weight:600;height:40px}
+
+.effective{background:#a185b4}
