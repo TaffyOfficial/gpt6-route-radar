@@ -37,6 +37,7 @@
     c.minSuccess = clamp(c.minSuccess, 0, 100);
     if (!['ttftAvg', 'ttftP50', 'ttftP95'].includes(c.ttftMetric)) throw Error('未知 TTFT 口径');
     c.freshnessProfile = input.freshnessProfile === 'scheduled' ? 'scheduled' : 'local';
+    c.blockedKeys = Array.isArray(input.blockedKeys) ? [...new Set(input.blockedKeys.filter(k => typeof k === 'string'))] : [];
     for (const k of Object.keys(defaults.weights)) if (!finite(c.weights[k]) || c.weights[k] < 0) throw Error('权重不能为负数');
     const total = Object.values(c.weights).reduce((a, b) => a + b, 0);
     if (total <= 0) throw Error('至少保留一项权重');
@@ -52,7 +53,11 @@
     const liveMaxAge = c.freshnessProfile === 'scheduled' ? 1200000 : 180000;
     const liveStale = !Number.isFinite(liveTimestamp) || now - liveTimestamp > liveMaxAge || liveTimestamp - now > 60000;
     const stale = !Number.isFinite(timestamp) || now - timestamp > marketMaxAge || timestamp - now > 60000 || snapshot.complete !== true || liveStale;
-    const matches = snapshot.rows.filter(r => r.source === 'Codex Pro' && r.model === 'gpt-6-astra' && finite(r.multiplier) && r.multiplier >= c.minMultiplier);
+    const blockedKeys = new Set(c.blockedKeys);
+    const inScope = snapshot.rows.filter(r => r.source === 'Codex Pro' && r.model === 'gpt-6-astra' && finite(r.multiplier) && r.multiplier >= c.minMultiplier);
+    const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
+    const blocked = inScope.filter(isBlocked);
+    const matches = inScope.filter(r => !isBlocked(r));
     const rows = matches.map(r => {
       const reasons = [];
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
@@ -79,7 +84,7 @@
       r.score = Object.values(r.contributions).reduce((a, b) => a + b, 0);
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
-    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, eligible: rows.filter(r => r.eligible), excluded: rows.filter(r => !r.eligible) };
+    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible), excluded: rows.filter(r => !r.eligible) };
   }
   function plan(snapshot, input = {}, now = Date.now()) {
     const result = rank(snapshot, input, now);

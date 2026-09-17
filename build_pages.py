@@ -7,7 +7,7 @@ from pathlib import Path
 from collect import collect, save
 
 ROOT = Path(__file__).resolve().parent
-PUBLIC_FILES = ('index.html', 'style.css', 'app.js', 'rank.js', 'snapshot.json', 'snapshot.js')
+PUBLIC_FILES = ('index.html', 'style.css', 'app.js', 'rank.js', 'blacklist.js', 'snapshot.json', 'snapshot.js')
 
 
 def build(destination, refresh=True):

@@ -10,6 +10,8 @@
   let tab = 'all', selected = null, activePreset = 'balanced', lastResult = null, pendingRefresh = false;
   let page = 1, pageSize = 20, pageResult = null, pendingLive = false, refreshError = '', liveError = '';
   let lastLiveAttempt = 0, lastFullAttempt = 0;
+  const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
+  let undoKey = null;
   let weights = { price: 35, ttft: 35, cache: 25, cost: 5 };
   const online = /^https?:$/.test(location.protocol);
   const staticHosting = online && (window.ROUTER_RUNTIME?.mode === 'static' || !['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname));
@@ -23,7 +25,40 @@
 
   function configuration() {
     for (const id of ['min-success', 'min-samples', 'min-multiplier']) if (!$(id).checkValidity() || $(id).value === '') throw Error('请检查入选门槛：最低倍率 0.22，样本数至少 1，成功率 0–100%');
-    return { weights, minMultiplier: Number($('min-multiplier').value), minSamples: Number($('min-samples').value), minSuccess: Number($('min-success').value), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local' };
+    return { weights, minMultiplier: Number($('min-multiplier').value), minSamples: Number($('min-samples').value), minSuccess: Number($('min-success').value), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key) };
+  }
+  function blacklistFeedback(message) {
+    $('blacklist-feedback-text').textContent = [message, blacklist.error].filter(Boolean).join(' ');
+    $('blacklist-feedback').hidden = !$('blacklist-feedback-text').textContent;
+    $('undo-block').hidden = !undoKey;
+  }
+  function blockChannel(id) {
+    const row = snapshot.rows.find(r => r.id === id);
+    if (!row) return;
+    blacklist.block(row); undoKey = RouterBlacklist.key(row);
+    if (selected === id) selected = null;
+    render(); blacklistFeedback(`已拉黑 ${row.name}，已移出榜单与推荐。`);
+  }
+  function restoreChannel(key) {
+    blacklist.restore(key);
+    if (undoKey === key) undoKey = null;
+    render(); blacklistFeedback('已恢复该渠道，符合筛选条件时会重新显示。');
+  }
+  function renderBlacklist() {
+    const entries = blacklist.entries;
+    const showing = tab === 'blacklist';
+    $('blacklist-panel').hidden = !showing;
+    $('tab-blacklist').textContent = `黑名单 ${entries.length}`;
+    $('tab-blacklist').setAttribute('aria-pressed', String(showing));
+    for (const selector of ['.board-toolbar', '.table-wrap', '.pagination', '.legend']) document.querySelector('.board > ' + selector).hidden = showing;
+    $('restore-all').disabled = entries.length === 0;
+    $('blacklist-empty').hidden = entries.length > 0;
+    const current = new Map((snapshot?.rows || []).map(r => [RouterBlacklist.key(r), r]));
+    $('blacklist-list').innerHTML = entries.map(entry => {
+      const row = current.get(entry.key);
+      return `<div class="blacklist-entry"><div><b>${escape(row?.name || entry.name)}</b><p>${row ? '已从榜单、推荐和调度导出中排除' : '当前快照中没有此渠道，拉黑记录仍保留'} · ${Number.isFinite(Date.parse(entry.blockedAt)) ? escape(stamp(entry.blockedAt)) : '时间未记录'}</p></div><button class="button" type="button" data-restore="${escape(entry.key)}" aria-label="恢复 ${escape(row?.name || entry.name)}">恢复</button></div>`;
+    }).join('');
+    $('blacklist-list').querySelectorAll('[data-restore]').forEach(button => button.addEventListener('click', () => restoreChannel(button.dataset.restore)));
   }
   function note(message, error = false) {
     $('notice').textContent = message;
@@ -55,6 +90,7 @@
     render();
   }
   function render() {
+    renderBlacklist();
     if (!snapshot) { note('没有可用数据快照，请运行 collect.py 或启动本地服务后刷新。', true); return; }
     let result;
     try { result = RouterRank.rank(snapshot, configuration()); }
@@ -65,7 +101,7 @@
     $('updated').textContent = '行情 ' + stamp(time);
     $('live-updated').textContent = `${liveError ? '更新失败 · 保留 ' : result.liveStale ? '成功率已过期 · ' : '成功率 '}${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}`;
     $('live-updated').className = liveError || result.liveStale ? 'live-warning' : '';
-    $('scope-count').textContent = `${snapshot.count} 条符合基础筛选`;
+    $('scope-count').textContent = `${snapshot.count} 条符合基础筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
     if (refreshError || liveError) note([refreshError, liveError].filter(Boolean).join('；'), true);
     else if (result.stale) note(staticHosting ? '定时快照已超过 20 分钟。当前保留历史行情，请等待后台采集或检查新快照。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
     else if (!online) note('当前为离线快照。运行 启动.ps1 可刷新行情。');
@@ -82,7 +118,7 @@
     } else {
       $('rec-state').textContent = '暂无入选';
       $('recommend-title').textContent = '当前没有满足门槛的渠道';
-      $('recommend-copy').textContent = '全部渠道仍在榜单中，可以查看原因或调整推荐门槛。';
+      $('recommend-copy').textContent = blacklist.entries.length ? '可在黑名单恢复渠道，或调整推荐门槛。' : '全部渠道仍在榜单中，可以查看原因或调整推荐门槛。';
       $('route-chain').innerHTML = '';
     }
     $('tab-all').textContent = `全部 ${result.rows.length}`;
@@ -92,21 +128,22 @@
     $('tab-eligible').setAttribute('aria-pressed', String(tab === 'eligible'));
     $('tab-excluded').setAttribute('aria-pressed', String(tab === 'excluded'));
     $('eligible-count').textContent = `${result.rows.length} 个渠道 · 总量不限`;
-    $('board-description').textContent = tab === 'all' ? '全部按综合分排序 · 推荐门槛不隐藏渠道 · 点击渠道查看各模型状态' : tab === 'eligible' ? '已通过推荐门槛 · 按综合分排序' : '显示未通过推荐门槛的渠道及原因';
+    $('board-description').textContent = tab === 'blacklist' ? '你的本地黑名单 · 可随时恢复 · 不跨浏览器同步' : tab === 'all' ? '按综合分排序 · 已排除黑名单 · 点击渠道查看各模型状态' : tab === 'eligible' ? '已通过推荐门槛 · 按综合分排序' : '显示未通过推荐门槛的渠道及原因';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
-    const allShown = tab === 'all' ? result.rows : result[tab];
+    const allShown = tab === 'blacklist' ? [] : tab === 'all' ? result.rows : result[tab];
     pageResult = RouterRank.paginate(allShown, page, pageSize);
     page = pageResult.page;
     const shown = pageResult.rows;
     $('empty').hidden = shown.length > 0;
-    $('empty').textContent = tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区。' : '没有处于观察区的渠道。';
+    $('empty').textContent = tab === 'all' ? (blacklist.entries.length ? '当前没有可显示的渠道。可在黑名单中恢复，或调整筛选条件。' : '没有符合当前筛选条件的渠道。') : tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区或黑名单。' : '没有处于观察区的渠道。';
     $('rows').innerHTML = shown.map((r, i) => `<tr class="${r.id === selected ? 'selected' : ''}">
-      <td><div class="channel-cell"><span class="rank-number ${pageResult.start + i < 3 ? 'top' : ''}">${String(pageResult.start + i + 1).padStart(2, '0')}</span><div><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
+      <td><div class="channel-cell"><span class="rank-number ${pageResult.start + i < 3 ? 'top' : ''}">${String(pageResult.start + i + 1).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
       <td><span class="score-value">${format(r.score)}</span><div class="score-bar" aria-hidden="true">${keys.map(k => `<span class="${k}" style="width:${r.contributions[k]}%"></span>`).join('')}</div></td>
       <td>${escape(r.multiplier)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
       <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>gpt6</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="8"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
     $('rows').querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => { selected = b.dataset.id; render(); }));
+    $('rows').querySelectorAll('[data-block]').forEach(b => b.addEventListener('click', () => blockChannel(b.dataset.block)));
     renderPagination();
     renderDetail();
   }
@@ -124,20 +161,27 @@
   function changePage(next) { page = next; render(); }
   function renderDetail() {
     const r = lastResult.rows.find(r => r.id === selected);
-    $('detail').hidden = !r;
-    if (!r) return;
-    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>${r.eligible ? '已通过门槛；排名仍受公开统计窗口影响。' : escape(r.reasons.join('；'))}</p></div><button id="copy-id" class="button" type="button">复制分组 ID</button></div>
+    $('detail').hidden = !r || tab === 'blacklist';
+    if (!r || tab === 'blacklist') return;
+    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>${r.eligible ? '已通过门槛；排名仍受公开统计窗口影响。' : escape(r.reasons.join('；'))}</p></div><div class="detail-actions"><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
       <div class="detail-grid"><div><label>gpt6 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>gpt6 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown">${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
       <div class="table-wrap model-status-table"><table><thead><tr><th>模型</th><th>当前状态</th><th>最新成功率</th><th>请求数</th><th>统计窗口</th><th>缓存命中率</th></tr></thead><tbody>${(r.modelStats || (r.models || [r.model]).map(model => ({model}))).map(m => `<tr><td>${escape(m.model)}</td><td>${statusLabel(m.status)}</td><td>${percent(m.success)}</td><td>${escape(m.requests ?? 0)}</td><td>${windowLabel(m.windowHours)}</td><td>${percent(m.cache)}</td></tr>`).join('')}</tbody></table></div><div class="group-id">${escape(r.id)}</div>`;
     $('copy-id').addEventListener('click', async () => { try { await navigator.clipboard.writeText(r.id); $('copy-id').textContent = '已复制'; } catch { note('复制失败，可在详情底部手动选择分组 ID。', true); } });
+    $('detail-block').addEventListener('click', () => blockChannel(r.id));
   }
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
   for (const id of ['min-success', 'min-samples', 'min-multiplier', 'ttft-metric']) $(id).addEventListener('change', render);
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
   $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = .22; $('ttft-metric').value = 'ttftAvg'; render(); });
-  for (const name of ['all', 'eligible', 'excluded']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
+  for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
+  $('undo-block').addEventListener('click', () => { if (undoKey) restoreChannel(undoKey); });
+  $('restore-all').addEventListener('click', () => { blacklist.clear(); undoKey = null; render(); blacklistFeedback('已恢复全部渠道。'); });
+  window.addEventListener('storage', event => {
+    if (event.key !== null && event.key !== RouterBlacklist.storageKey) return;
+    blacklist.read(); undoKey = null; render(); blacklistFeedback('黑名单已与其他页面同步。');
+  });
   $('page-size').addEventListener('change', e => { pageSize = e.target.value; page = 1; render(); });
   $('first-page').addEventListener('click', () => changePage(1));
   $('prev-page').addEventListener('click', () => changePage(page - 1));
@@ -213,6 +257,7 @@
     $('freshness-method').textContent = '调度建议为定时快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
   }
   render();
+  if (blacklist.error) blacklistFeedback('');
   if (online) { if (staticHosting) refreshStatic(); else if (snapshot) { if (snapshot.schemaVersion !== 2 || Date.now() - Date.parse(snapshot.capturedAt) >= 300000) refreshAll(); else refreshLive(); } }
   setInterval(() => { if (snapshot) { if (lastResult && !lastResult.stale && (Date.now() - Date.parse(snapshot.capturedAt) > lastResult.marketMaxAge || Date.now() - Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) > lastResult.liveMaxAge)) render(); tick(); } }, 15000);
 })();

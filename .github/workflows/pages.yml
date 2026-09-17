@@ -29,6 +29,7 @@ jobs:
       - name: Verify ranking and collector
         run: |
           node test-rank.js
+          node test-blacklist.js
           python -m unittest test_collect.py test_pages.py
       - name: Collect public market and build static site
         run: python build_pages.py
