@@ -1,0 +1,21 @@
+name: Temporary schedule diagnostic
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Record trigger and UTC time
+        env:
+          TRIGGER: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          date -u +'%Y-%m-%dT%H:%M:%SZ'
+          printf 'trigger=%s schedule=%s\n' "$TRIGGER" "$SCHEDULE"
