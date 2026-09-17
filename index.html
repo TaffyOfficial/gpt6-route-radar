@@ -44,7 +44,7 @@
           <label class="input-label" for="min-samples">gpt6 最少请求样本</label><input id="min-samples" type="number" min="1" max="100000" step="1" value="20">
           <label class="input-label" for="min-multiplier">最低倍率</label><input id="min-multiplier" type="number" min="0.22" max="100" step="0.01" value="0.22">
           <label class="input-label" for="ttft-metric">TTFT 统计口径</label><select id="ttft-metric"><option value="ttftAvg">平均 TTFT</option><option value="ttftP50">P50 · 典型延迟</option><option value="ttftP95">P95 · 尾部延迟</option></select>
-          <p class="field-help">成功率和样本门槛只影响推荐，全部榜单仍展示。TTFT 为渠道全模型近 24h。</p>
+          <p class="field-help">未过门槛降至 0–49 分；通过后为 50–100 分。TTFT 为渠道全模型近 24h。</p>
         </aside>
         <div class="results">
           <section class="recommendation" aria-labelledby="recommend-title">
@@ -58,16 +58,16 @@
             <div class="channel-search"><label for="channel-search">查找渠道</label><div class="search-input-row"><input id="channel-search" type="search" placeholder="输入编号，如 153，或渠道名 / 分组 ID" autocomplete="off" aria-describedby="search-help"><button id="clear-search" class="text-button" type="button" hidden>清空</button></div><p id="search-help">编号精确查找，名称模糊搜索；保留完整榜单名次，未上榜会说明原因。</p><p id="search-summary" role="status" aria-live="polite" hidden></p></div>
             <section id="blacklist-panel" class="blacklist-panel" aria-label="黑名单管理" hidden><div class="blacklist-heading"><p>仅保存在当前浏览器。拉黑渠道不参与榜单、推荐和调度导出。</p><button id="restore-all" type="button" class="button">全部恢复</button></div><div id="blacklist-list"></div><p id="blacklist-empty">还没有拉黑渠道。点击渠道旁的「拉黑」即可。</p></section>
             <div class="board-toolbar"><span id="live-caption">成功率来源：CodeGo /api/group-status</span><label for="page-size">每页 <select id="page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option><option value="all">全部 · 不限</option></select></label></div>
-            <div class="table-wrap"><table><thead><tr><th scope="col">排名 / 渠道</th><th scope="col">综合分</th><th scope="col">价格倍率</th><th scope="col" id="ttft-heading">平均 TTFT</th><th scope="col">gpt6 缓存</th><th scope="col">最新成功率 <small>gpt6 / 渠道整体</small></th><th scope="col">渠道 24h <small>成功率</small></th><th scope="col">gpt6 历史实扣 <small>$/1M tokens</small></th></tr></thead><tbody id="rows"></tbody></table><div id="empty" hidden></div></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">排名 / 渠道</th><th scope="col">综合分 <small>门槛已计入</small></th><th scope="col">价格倍率</th><th scope="col" id="ttft-heading">平均 TTFT</th><th scope="col">gpt6 缓存</th><th scope="col">最新成功率 <small>gpt6 / 渠道整体</small></th><th scope="col">渠道 24h <small>成功率</small></th><th scope="col">gpt6 历史实扣 <small>$/1M tokens</small></th></tr></thead><tbody id="rows"></tbody></table><div id="empty" hidden></div></div>
             <nav class="pagination" aria-label="渠道分页"><span id="page-summary" aria-live="polite"></span><div class="page-controls"><button id="first-page" type="button" class="button">首页</button><button id="prev-page" type="button" class="button">上一页</button><span id="page-numbers"></span><button id="next-page" type="button" class="button">下一页</button><button id="last-page" type="button" class="button">末页</button><label for="page-jump">跳至 <input id="page-jump" type="number" min="1" value="1"> 页</label><button id="go-page" class="button" type="button">前往</button></div></nav>
             <section id="search-outside" class="search-outside" aria-label="未上榜渠道" hidden></section>
-            <div class="legend"><span>分数构成</span><span><i class="swatch price"></i>价格</span><span><i class="swatch ttft"></i>TTFT</span><span><i class="swatch cache"></i>缓存</span><span><i class="swatch cost"></i>gpt6 历史实扣</span><span class="row-hint">点渠道名查看依据</span></div>
+            <div class="legend"><span>综合分构成</span><span><i class="swatch gate"></i>推荐门槛</span><span><i class="swatch price"></i>价格</span><span><i class="swatch ttft"></i>TTFT</span><span><i class="swatch cache"></i>缓存</span><span><i class="swatch cost"></i>gpt6 历史实扣</span><span class="row-hint">点渠道名查看依据</span></div>
           </section>
           <section id="detail" class="detail" hidden aria-live="polite"></section>
           <details class="method"><summary>排名怎么计算？数据有哪些局限？</summary><div class="method-body">
-            <p><b>全部上榜，推荐另有门槛。</b>所有 Codex Pro、支持 gpt-6-astra、倍率 ≥ 0.22 的渠道都显示并评分，不限制总条数。通过验证、未处于观察期、并发未满、样本与成功率达标的渠道才进入调度建议。缺失项不给分，零延迟不当成极速。</p>
+            <p><b>推荐门槛计入综合分。</b>所有 Codex Pro、支持 gpt-6-astra、倍率 ≥ 0.22 的渠道都显示并评分，不限制总条数。通过验证、未处于观察期、无当前故障、并发未满、样本与成功率达标且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。</p>
             <p><b>黑名单仅对当前浏览器生效。</b>拉黑后渠道从榜单、推荐和新导出的调度建议中移除；「黑名单」中可恢复。刷新行情、改名和价格变化不会解除拉黑。清除网站存储会清除名单，不跨设备同步，也不修改 CodeGo 账户。</p>
-            <p><b>默认 35 / 35 / 25 / 5。</b>价格分 = 100 × 0.22 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。各项按权重相加，分数是取舍指标，不是成功概率。</p>
+            <p><b>基础分默认 35 / 35 / 25 / 5。</b>价格分 = 100 × 0.22 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。四项按权重相加得到基础分；通过门槛时综合分 = 50 + 基础分 × 0.5，未通过时 = 基础分 × 0.49。各档内仍按原有偏好排序，分数不是成功概率。</p>
             <p><b>价格以同模型公开倍率比较。</b>gpt6 历史实扣是 gpt6 钱包/通用额度成功请求每百万实际 token 的平均扣费，按站点 quota_per_unit 换算；不代表充值人民币成本，也不包含套餐折算。</p>
             <p><b>TTFT 有局限。</b>公开市场给的是渠道全模型近 24h 的平均/P50/P95，不是 gpt6 专属 TTFT。成功率与样本量来自单模型 sample_window；缓存来自同一模型条目，接口没有单独说明缓存的统计窗口或分母。</p>
             <p id="refresh-method"><b>最新成功率来自官方状态接口。</b>本地页面保持打开且可见时每 60 秒读取 /api/group-status，行情每 5 分钟刷新。数字是滚动统计，不是单次探测；更新失败保留旧值并提示。</p>

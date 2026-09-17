@@ -82,7 +82,12 @@
         cost: costMin && finite(r.historicalCost) && r.historicalCost > 0 ? 100 * clamp(costMin / r.historicalCost, 0, 1) : 0
       };
       r.contributions = Object.fromEntries(Object.keys(c.weights).map(k => [k, c.weights[k] * r.components[k]]));
-      r.score = Object.values(r.contributions).reduce((a, b) => a + b, 0);
+      r.baseScore = clamp(Object.values(r.contributions).reduce((a, b) => a + b, 0), 0, 100);
+      // Fixed bands keep every recommendation above observation rows, independent of other channels.
+      const scoreScale = r.eligible ? .5 : .49;
+      const gateScore = r.eligible ? 50 : 0;
+      r.score = gateScore + r.baseScore * scoreScale;
+      r.scoreContributions = { gate: gateScore, ...Object.fromEntries(Object.entries(r.contributions).map(([k, v]) => [k, v * scoreScale])) };
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
     rows.forEach((r, i) => { r.overallRank = i + 1; });
@@ -116,7 +121,7 @@
     const result = rank(snapshot, input, now);
     if (result.stale) throw Error(result.config.freshnessProfile === 'scheduled' ? '线上快照超过 20 分钟或不完整，请刷新或等待下次采集' : '行情超过 10 分钟、成功率超过 3 分钟或数据不完整，请先刷新');
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
-    return { schemaVersion: 2, mode: 'recommendation_only', model: 'gpt-6-astra', source: 'Codex Pro', generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: result.config, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, name: r.name, multiplier: r.multiplier, score: +r.score.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
+    return { schemaVersion: 2, mode: 'recommendation_only', model: 'gpt-6-astra', source: 'Codex Pro', generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...result.config, method: 'eligibility_bands_v1', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, name: r.name, multiplier: r.multiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
   return { defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
 });

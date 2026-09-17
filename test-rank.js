@@ -44,6 +44,41 @@ test('all-channel ranking retains low success and low sample channels with score
   assert.equal(r.rows.length, 3); assert.equal(r.eligible.length, 1);
   assert.ok(r.rows.every(row => Number.isFinite(row.score)));
 });
+test('even the best observation score stays below the weakest eligible channel', () => {
+  const changes = [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { observing: true }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
+  const s = snap([make({ id: 'eligible', cache: 0 }), ...changes.map((change, i) => make({ id: 'excluded-' + i, cache: 100, ...change }))]);
+  const r = rank(s, { weights: { price: 0, ttft: 0, cache: 100, cost: 0 } }, now);
+  assert.equal(r.rows[0].id, 'eligible'); assert.equal(r.rows[0].score, 50);
+  assert.ok(r.excluded.every(row => row.score >= 0 && row.score <= 49 && row.reasons.length > 0));
+  assert.equal(r.excluded[0].baseScore, 100); assert.equal(r.excluded[0].score, 49);
+  assert.equal(r.excluded.at(-1).score, 0);
+});
+test('fixed bands retain weighted base score, ordering and exact score-bar contributions', () => {
+  const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', success: 90 })]), {}, now);
+  assert.deepEqual(r.rows.map(row => row.id), ['a', 'b', 'c']);
+  assert.equal(r.rows[0].baseScore, 78.75); assert.equal(r.rows[0].score, 89.375);
+  assert.equal(r.rows[2].score, r.rows[2].baseScore * .49);
+  for (const row of r.rows) assert.ok(Math.abs(Object.values(row.scoreContributions).reduce((a, b) => a + b, 0) - row.score) < 1e-10);
+  const p = plan(snap([make()]), {}, now);
+  assert.equal(p.scoring.method, 'eligibility_bands_v1');
+  assert.equal(p.channels[0].baseScore, 78.75); assert.equal(p.channels[0].score, 89.375);
+});
+test('observation bands stay fixed when other channels or recommendation filters change', () => {
+  const observation = make({ id: 'watch', observing: true, historicalCost: null });
+  const alone = rank(snap([observation]), {}, now).rows[0];
+  const together = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), {}, now);
+  const raised = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), { minSuccess: 99 }, now);
+  assert.equal(together.rows.find(row => row.id === 'watch').score, alone.score);
+  assert.equal(raised.rows.find(row => row.id === 'watch').score, alone.score);
+  assert.ok(raised.rows.every(row => row.score <= 49));
+});
+test('current success and user thresholds move scores between the same fixed bands', () => {
+  const s = snap([make({ success: 94 })]);
+  assert.ok(rank(s, {}, now).rows[0].score <= 49);
+  assert.ok(rank(s, { minSuccess: 94 }, now).rows[0].score >= 50);
+  const updated = applyStatus(s, { capturedAt: new Date(now + 1000).toISOString(), data: [{ group_id: 'a', models: [{ model: 'gpt-6-astra', success_rate: 99, request_count: 100, cache_hit_rate: 85, status: 'healthy' }] }] });
+  assert.ok(rank(updated, {}, now + 1000).rows[0].score >= 50);
+});
 test('pagination visits every channel exactly once with continuous offsets', () => {
   const rows = Array.from({length:123}, (_,i) => ({id:i}));
   const collected = [];
