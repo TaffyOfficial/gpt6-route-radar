@@ -1,0 +1,14 @@
+name: Temporary independent runner diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Record UTC time without deployment or concurrency locks
+        run: date -u +'%Y-%m-%dT%H:%M:%SZ'

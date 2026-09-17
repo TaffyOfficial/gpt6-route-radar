@@ -5,9 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    # Keep the five-minute cadence away from the top of the hour.
+    # Keep the ten-minute cadence away from the top of the hour.
     # GitHub may delay or drop scheduled events; workflow_dispatch is the recovery path.
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
 
 permissions:
   contents: read

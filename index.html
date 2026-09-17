@@ -24,7 +24,7 @@
         <div class="refresh-box"><button id="refresh" class="button primary" type="button">刷新数据 ↻</button><span id="updated">读取快照…</span><span id="live-updated" aria-live="polite">成功率等待更新</span><label class="auto-refresh"><input id="auto-refresh" type="checkbox" checked><span id="auto-refresh-label">成功率每 60 秒更新</span></label></div>
       </div>
       <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span>仅 Codex Pro</span><span>仅 gpt-6-astra</span><span>倍率 ≥ 0.22</span><span id="scope-count"></span></div>
-      <div id="hosting-note" class="hosting-note" hidden>线上定时快照 · 计划每 5 分钟采集，GitHub 不保证准点。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
+      <div id="hosting-note" class="hosting-note" hidden>线上定时快照 · 计划每 10 分钟采集，GitHub 不保证准点。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
       <div id="notice" role="status" aria-live="polite" hidden></div>
       <div id="collection-recovery" class="collection-recovery" hidden>后台尚未发布新数据。<a href="https://github.com/TaffyOfficial/gpt6-route-radar/actions/workflows/pages.yml" target="_blank" rel="noreferrer">查看采集任务 ↗</a>；仓库维护者可点 Run workflow 立即采集，完成后再检查快照。</div>
       <div id="blacklist-feedback" class="blacklist-feedback" role="status" aria-live="polite" hidden><span id="blacklist-feedback-text"></span><button id="undo-block" type="button" class="text-button" hidden>撤销拉黑</button></div>

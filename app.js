@@ -289,7 +289,7 @@
     $('auto-refresh-label').textContent = '每 60 秒检查新快照';
     $('refresh').textContent = refreshLabel;
     $('footer-mode').textContent = '开源排行榜 · GitHub Pages · 定时采集';
-    $('refresh-method').textContent = '线上数据由 GitHub Actions 计划每 5 分钟读取官方接口并发布；调度可能延迟。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
+    $('refresh-method').textContent = '线上数据由 GitHub Actions 计划每 10 分钟读取官方接口并发布；调度可能延迟。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
     $('freshness-method').textContent = '调度建议为定时快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
   }
   render();

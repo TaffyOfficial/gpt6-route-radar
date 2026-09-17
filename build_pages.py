@@ -32,7 +32,7 @@ def build(destination, refresh=True):
         raise ValueError('Destination contains unexpected files; choose an empty build directory')
     for name in PUBLIC_FILES:
         shutil.copyfile(ROOT / name, destination / name)
-    settings = {'mode': 'static', 'scheduledMinutes': 5, 'repository': 'https://github.com/TaffyOfficial/gpt6-route-radar'}
+    settings = {'mode': 'static', 'scheduledMinutes': 10, 'repository': 'https://github.com/TaffyOfficial/gpt6-route-radar'}
     (destination / 'runtime.js').write_text('window.ROUTER_RUNTIME = ' + json.dumps(settings) + ';\n', encoding='utf-8')
     (destination / '.nojekyll').write_text('', encoding='utf-8')
     print(f"Built {snapshot['count']} channels at {snapshot['capturedAt']}")
