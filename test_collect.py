@@ -67,10 +67,12 @@ class CollectorTests(unittest.TestCase):
 
     def test_below_floor_channels_are_searchable_but_not_ranked(self):
         group = {'id': 'a', 'channel_id': '153', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .2, 'system_display_name': '153-Codex Pro-0.2x'}
-        out = collect.normalize([group], {'data': []}, {}, {'data': {'quota_per_unit': 500000}})
-        self.assertEqual(out['count'], 0)
-        self.assertEqual(out['rows'], [])
-        self.assertEqual(out['lookupRows'][0]['channelId'], '153')
+        low = {**group, 'id': 'low', 'channel_id': '999', 'multiplier': .199999}
+        out = collect.normalize([group, low], {'data': []}, {}, {'data': {'quota_per_unit': 500000}})
+        self.assertEqual(out['minMultiplier'], .2)
+        self.assertEqual(out['count'], 1)
+        self.assertEqual(out['rows'][0]['channelId'], '153')
+        self.assertEqual(out['lookupRows'][0]['channelId'], '999')
 
     def test_historical_cost_uses_only_gpt6_and_never_group_or_other_models(self):
         group = {'id': 'a', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .22, 'system_display_name': 'test', 'avg_consumer_amount': 9999999, 'avg_consumer_amount_by_model': {'gpt-5.6-sol': 8888888, 'gpt-6-astra': 175000}}

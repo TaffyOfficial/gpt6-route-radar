@@ -3,7 +3,7 @@
   else root.RouterRank = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-  const defaults = { minMultiplier: .22, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 35, ttft: 35, cache: 25, cost: 5 } };
+  const defaults = { minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 35, ttft: 35, cache: 25, cost: 5 } };
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function applyStatus(snapshot, response) {
@@ -33,7 +33,7 @@
   function config(input = {}) {
     const c = { ...defaults, ...input, weights: { ...defaults.weights, ...input.weights } };
     for (const k of ['minMultiplier', 'minSamples', 'minSuccess']) if (!finite(c[k])) throw Error('筛选条件需要有效数字');
-    c.minMultiplier = Math.max(.22, c.minMultiplier);
+    c.minMultiplier = Math.max(defaults.minMultiplier, c.minMultiplier);
     c.minSamples = Math.max(1, Math.floor(c.minSamples));
     c.minSuccess = clamp(c.minSuccess, 0, 100);
     if (!['ttftAvg', 'ttftP50', 'ttftP95'].includes(c.ttftMetric)) throw Error('未知 TTFT 口径');
@@ -76,7 +76,7 @@
     const costMin = observed.length ? Math.min(...observed) : null;
     for (const r of rows) {
       r.components = {
-        price: 100 * clamp(.22 / r.multiplier, 0, 1),
+        price: 100 * clamp(defaults.minMultiplier / r.multiplier, 0, 1),
         ttft: finite(r.latency) && r.latency > 0 ? 100 / (1 + r.latency / 10000) : 0,
         cache: finite(r.cache) ? clamp(r.cache, 0, 100) : 0,
         cost: costMin && finite(r.historicalCost) && r.historicalCost > 0 ? 100 * clamp(costMin / r.historicalCost, 0, 1) : 0

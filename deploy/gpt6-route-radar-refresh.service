@@ -1,0 +1,21 @@
+[Unit]
+Description=Refresh Route Radar when its published snapshot is old
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=route-radar
+Group=route-radar
+ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/trigger_refresh.py
+StateDirectory=gpt6-route-radar
+UMask=0077
+TimeoutStartSec=180
+Nice=10
+CPUQuota=10%
+MemoryMax=128M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

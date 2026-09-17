@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Route Radar every ten minutes independently of GitHub cron
+
+[Timer]
+OnCalendar=*-*-* *:03/10:00
+AccuracySec=10s
+Persistent=true
+Unit=gpt6-route-radar-refresh.service
+
+[Install]
+WantedBy=timers.target

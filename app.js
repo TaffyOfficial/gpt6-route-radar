@@ -26,7 +26,7 @@
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === 'gpt-6-astra' ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
-    for (const id of ['min-success', 'min-samples', 'min-multiplier']) if (!$(id).checkValidity() || $(id).value === '') throw Error('请检查入选门槛：最低倍率 0.22，样本数至少 1，成功率 0–100%');
+    for (const id of ['min-success', 'min-samples', 'min-multiplier']) if (!$(id).checkValidity() || $(id).value === '') throw Error('请检查入选门槛：最低倍率 0.20，样本数至少 1，成功率 0–100%');
     return { weights, minMultiplier: Number($('min-multiplier').value), minSamples: Number($('min-samples').value), minSuccess: Number($('min-success').value), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key) };
   }
   function blacklistFeedback(message) {
@@ -196,7 +196,7 @@
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
   for (const id of ['min-success', 'min-samples', 'min-multiplier', 'ttft-metric']) $(id).addEventListener('change', render);
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
-  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = .22; $('ttft-metric').value = 'ttftAvg'; render(); });
+  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = RouterRank.defaults.minMultiplier; $('ttft-metric').value = 'ttftAvg'; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {
@@ -289,7 +289,7 @@
     $('auto-refresh-label').textContent = '每 60 秒检查新快照';
     $('refresh').textContent = refreshLabel;
     $('footer-mode').textContent = '开源排行榜 · GitHub Pages · 定时采集';
-    $('refresh-method').textContent = '线上数据由 GitHub Actions 计划每 10 分钟读取官方接口并发布；调度可能延迟。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
+    $('refresh-method').textContent = '服务器每 10 分钟检查快照，过旧时触发 GitHub Actions 采集并发布；GitHub 定时触发保留为补充。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
     $('freshness-method').textContent = '调度建议为定时快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
   }
   render();

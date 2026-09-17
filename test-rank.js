@@ -2,12 +2,12 @@
 const assert = require('node:assert/strict');
 const { rank, plan, paginate, applyStatus, search } = require('./rank.js');
 const now = Date.UTC(2026, 8, 17, 10);
-const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .22, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
+const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .20, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
 const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete: true });
 let tests = 0;
 function test(name, fn) { fn(); tests++; console.log('PASS', name); }
-test('exact source/model and inclusive 0.22 floor', () => {
-  const r = rank(snap([make(), make({ id: 'b', multiplier: .219999 }), make({ id: 'c', source: 'Codex Plus' }), make({ id: 'd', model: 'gpt-5.6-sol' })]), {}, now);
+test('exact source/model and inclusive 0.20 floor', () => {
+  const r = rank(snap([make(), make({ id: 'b', multiplier: .199999 }), make({ id: 'c', source: 'Codex Plus' }), make({ id: 'd', model: 'gpt-5.6-sol' })]), {minMultiplier: .1}, now);
   assert.deepEqual(r.rows.map(r => r.id), ['a']);
 });
 test('zero/missing latency and missing cache never rank as free/fast', () => {
@@ -18,7 +18,7 @@ test('current model failure, low sample, observing and full capacity gated', () 
   for (const change of [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { observing: true }, { verified: false }, { maxConcurrency: 3, currentConcurrency: 3 }]) assert.equal(rank(snap([make(change)]), {}, now).eligible.length, 0);
 });
 test('lower price and lower latency improve their scores', () => {
-  const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 })]), {}, now);
+  const r = rank(snap([make(), make({ id: 'b', multiplier: .40, ttftAvg: 20000 })]), {}, now);
   assert.equal(r.eligible[0].id, 'a');
   assert.equal(r.eligible[0].components.price, 100);
   assert.equal(r.eligible[1].components.price, 50);
@@ -127,10 +127,10 @@ test('search preserves full ranking and matches numeric IDs exactly across pages
   assert.equal(plan(s,{},now).channels.length,3);
 });
 test('search explains floor and blacklist exclusions without restoring or scoring them', () => {
-  const s = {...snap([make({channelId:'200'})]),lookupRows:[make({id:'low',channelId:'153',multiplier:.2,historicalCost:.00001})]};
-  const r = rank(s,{},now), found=search(s,r,'153');
+  const s = {...snap([make({channelId:'200'})]),lookupRows:[make({id:'low',channelId:'999',multiplier:.19,historicalCost:.00001})]};
+  const r = rank(s,{},now), found=search(s,r,'999');
   assert.equal(found.rows.length,0);assert.equal(found.outside.length,1);assert.equal(found.outside[0].overallRank,null);
-  assert.match(found.outside[0].reasons[0],/0.2×.*0.22×/);
+  assert.match(found.outside[0].reasons[0],/0.19×.*0.2×/);
   assert.equal(r.rows[0].components.cost,100);assert.equal(plan(s,{},now).channels[0].channel_id,'200');
   const blocked=rank(s,{blockedKeys:['channel:200']},now);
   assert.equal(search(s,blocked,'200').outside[0].blockKey,'channel:200');
@@ -139,7 +139,7 @@ test('search explains floor and blacklist exclusions without restoring or scorin
   assert.match(search(s,raised,'200').outside[0].reasons[0],/0.3×/);
 });
 test('lookup-only channels receive current model status too', () => {
-  const s={...snap([]),lookupRows:[make({id:'low',channelId:'153',multiplier:.2})]};
+  const s={...snap([]),lookupRows:[make({id:'low',channelId:'999',multiplier:.19})]};
   const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'low',models:[{model:'gpt-6-astra',success_rate:97,request_count:50,cache_hit_rate:80}]}]});
   assert.equal(updated.lookupRows[0].success,97);assert.equal(updated.rows.length,0);
 });

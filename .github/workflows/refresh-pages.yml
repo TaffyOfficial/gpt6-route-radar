@@ -2,7 +2,7 @@ name: Refresh data and deploy Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, server-refresh]
   workflow_dispatch:
   schedule:
     # Keep the ten-minute cadence away from the top of the hour.
@@ -18,6 +18,9 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The server branch is only a wake-up signal. Always publish current main.
+          ref: main
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -28,7 +31,7 @@ jobs:
         run: |
           node test-rank.js
           node test-blacklist.js
-          python -m unittest test_collect.py test_pages.py
+          python -m unittest test_collect.py test_pages.py test_trigger.py
       - name: Collect public market and build static site
         run: python build_pages.py
       - uses: actions/upload-pages-artifact@v3

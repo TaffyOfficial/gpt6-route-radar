@@ -10,6 +10,7 @@ import urllib.request
 
 BASE = 'https://shu26.cfd'
 MODEL = 'gpt-6-astra'
+MIN_MULTIPLIER = .20
 ROOT = Path(__file__).resolve().parent
 
 
@@ -78,11 +79,11 @@ def normalize(groups, statuses, pricing, site, captured_at=None):
             **status_fields(status, list(dict.fromkeys(g.get('models', [])))),
         })
     timestamp = captured_at or datetime.now(timezone.utc).isoformat()
-    rows = [r for r in result if isinstance(r['multiplier'], (int, float)) and r['multiplier'] >= .22]
+    rows = [r for r in result if isinstance(r['multiplier'], (int, float)) and r['multiplier'] >= MIN_MULTIPLIER]
     lookup_rows = [r for r in result if r not in rows]
     return {
         'schemaVersion': 2, 'capturedAt': timestamp, 'liveCapturedAt': timestamp,
-        'model': MODEL, 'source': 'Codex Pro', 'minMultiplier': .22,
+        'model': MODEL, 'source': 'Codex Pro', 'minMultiplier': MIN_MULTIPLIER,
         'marketTotal': len(groups), 'count': len(rows), 'complete': True,
         'pricing': price, 'quotaPerUnit': quota, 'currency': 'USD platform quota',
         'sources': [BASE + group_path(1), BASE + '/api/group-status', BASE + '/api/pricing', BASE + '/api/status'],

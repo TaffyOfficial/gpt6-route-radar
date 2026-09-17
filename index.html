@@ -23,8 +23,8 @@
         <div><div class="eyebrow">CODEX PRO / GPT-6-ASTRA</div><h1>把每一条请求，<br class="mobile-break">交给合适的渠道。</h1><p>价格、首字延迟、缓存一起看。gpt6 历史实扣只作辅助。</p></div>
         <div class="refresh-box"><button id="refresh" class="button primary" type="button">刷新数据 ↻</button><span id="updated">读取快照…</span><span id="live-updated" aria-live="polite">成功率等待更新</span><label class="auto-refresh"><input id="auto-refresh" type="checkbox" checked><span id="auto-refresh-label">成功率每 60 秒更新</span></label></div>
       </div>
-      <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span>仅 Codex Pro</span><span>仅 gpt-6-astra</span><span>倍率 ≥ 0.22</span><span id="scope-count"></span></div>
-      <div id="hosting-note" class="hosting-note" hidden>线上定时快照 · 计划每 10 分钟采集，GitHub 不保证准点。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
+      <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span>仅 Codex Pro</span><span>仅 gpt-6-astra</span><span>倍率 ≥ 0.20</span><span id="scope-count"></span></div>
+      <div id="hosting-note" class="hosting-note" hidden>线上定时快照 · 服务器每 10 分钟检查并触发更新，发布可能延迟。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
       <div id="notice" role="status" aria-live="polite" hidden></div>
       <div id="collection-recovery" class="collection-recovery" hidden>后台尚未发布新数据。<a href="https://github.com/TaffyOfficial/gpt6-route-radar/actions/workflows/refresh-pages.yml" target="_blank" rel="noreferrer">查看采集任务 ↗</a>；仓库维护者可点 Run workflow 立即采集，完成后再检查快照。</div>
       <div id="blacklist-feedback" class="blacklist-feedback" role="status" aria-live="polite" hidden><span id="blacklist-feedback-text"></span><button id="undo-block" type="button" class="text-button" hidden>撤销拉黑</button></div>
@@ -42,7 +42,7 @@
           <h2>推荐门槛</h2>
           <label class="input-label" for="min-success">gpt6 最低成功率 <span>%</span></label><input id="min-success" type="number" min="0" max="100" step="1" value="95">
           <label class="input-label" for="min-samples">gpt6 最少请求样本</label><input id="min-samples" type="number" min="1" max="100000" step="1" value="20">
-          <label class="input-label" for="min-multiplier">最低倍率</label><input id="min-multiplier" type="number" min="0.22" max="100" step="0.01" value="0.22">
+          <label class="input-label" for="min-multiplier">最低倍率</label><input id="min-multiplier" type="number" min="0.20" max="100" step="0.01" value="0.20">
           <label class="input-label" for="ttft-metric">TTFT 统计口径</label><select id="ttft-metric"><option value="ttftAvg">平均 TTFT</option><option value="ttftP50">P50 · 典型延迟</option><option value="ttftP95">P95 · 尾部延迟</option></select>
           <p class="field-help">未过门槛降至 0–49 分；通过后为 50–100 分。TTFT 为渠道全模型近 24h。</p>
         </aside>
@@ -65,9 +65,9 @@
           </section>
           <section id="detail" class="detail" hidden aria-live="polite"></section>
           <details class="method"><summary>排名怎么计算？数据有哪些局限？</summary><div class="method-body">
-            <p><b>推荐门槛计入综合分。</b>所有 Codex Pro、支持 gpt-6-astra、倍率 ≥ 0.22 的渠道都显示并评分，不限制总条数。通过验证、未处于观察期、无当前故障、并发未满、样本与成功率达标且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。</p>
+            <p><b>推荐门槛计入综合分。</b>所有 Codex Pro、支持 gpt-6-astra、倍率 ≥ 0.20 的渠道都显示并评分，不限制总条数。通过验证、未处于观察期、无当前故障、并发未满、样本与成功率达标且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。</p>
             <p><b>黑名单仅对当前浏览器生效。</b>拉黑后渠道从榜单、推荐和新导出的调度建议中移除；「黑名单」中可恢复。刷新行情、改名和价格变化不会解除拉黑。清除网站存储会清除名单，不跨设备同步，也不修改 CodeGo 账户。</p>
-            <p><b>基础分默认 35 / 35 / 25 / 5。</b>价格分 = 100 × 0.22 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。四项按权重相加得到基础分；通过门槛时综合分 = 50 + 基础分 × 0.5，未通过时 = 基础分 × 0.49。各档内仍按原有偏好排序，分数不是成功概率。</p>
+            <p><b>基础分默认 35 / 35 / 25 / 5。</b>价格分 = 100 × 0.20 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。四项按权重相加得到基础分；通过门槛时综合分 = 50 + 基础分 × 0.5，未通过时 = 基础分 × 0.49。各档内仍按原有偏好排序，分数不是成功概率。</p>
             <p><b>价格以同模型公开倍率比较。</b>gpt6 历史实扣是 gpt6 钱包/通用额度成功请求每百万实际 token 的平均扣费，按站点 quota_per_unit 换算；不代表充值人民币成本，也不包含套餐折算。</p>
             <p><b>TTFT 有局限。</b>公开市场给的是渠道全模型近 24h 的平均/P50/P95，不是 gpt6 专属 TTFT。成功率与样本量来自单模型 sample_window；缓存来自同一模型条目，接口没有单独说明缓存的统计窗口或分母。</p>
             <p id="refresh-method"><b>最新成功率来自官方状态接口。</b>本地页面保持打开且可见时每 60 秒读取 /api/group-status，行情每 5 分钟刷新。数字是滚动统计，不是单次探测；更新失败保留旧值并提示。</p>
