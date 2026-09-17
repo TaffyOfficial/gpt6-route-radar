@@ -4,7 +4,7 @@
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const format = (v, digits = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : '—';
   const keys = ['price', 'ttft', 'cache', 'cost'];
-  const labels = { price: '价格', ttft: 'TTFT', cache: '缓存', cost: '历史实扣' };
+  const labels = { price: '价格', ttft: 'TTFT', cache: '缓存', cost: 'gpt6 实扣' };
   const presetWeights = { balanced: [35, 35, 25, 5], fast: [20, 55, 20, 5], cheap: [60, 20, 15, 5] };
   let snapshot = window.ROUTER_SNAPSHOT;
   let tab = 'all', selected = null, activePreset = 'balanced', lastResult = null, pendingRefresh = false;
@@ -12,6 +12,7 @@
   let lastLiveAttempt = 0, lastFullAttempt = 0;
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   let undoKey = null;
+  let searchQuery = new URLSearchParams(location.search).get('q') || '';
   let weights = { price: 35, ttft: 35, cache: 25, cost: 5 };
   const online = /^https?:$/.test(location.protocol);
   const staticHosting = online && (window.ROUTER_RUNTIME?.mode === 'static' || !['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname));
@@ -53,7 +54,7 @@
     for (const selector of ['.board-toolbar', '.table-wrap', '.pagination', '.legend']) document.querySelector('.board > ' + selector).hidden = showing;
     $('restore-all').disabled = entries.length === 0;
     $('blacklist-empty').hidden = entries.length > 0;
-    const current = new Map((snapshot?.rows || []).map(r => [RouterBlacklist.key(r), r]));
+    const current = new Map([...(snapshot?.rows || []), ...(snapshot?.lookupRows || [])].map(r => [RouterBlacklist.key(r), r]));
     $('blacklist-list').innerHTML = entries.map(entry => {
       const row = current.get(entry.key);
       return `<div class="blacklist-entry"><div><b>${escape(row?.name || entry.name)}</b><p>${row ? '已从榜单、推荐和调度导出中排除' : '当前快照中没有此渠道，拉黑记录仍保留'} · ${Number.isFinite(Date.parse(entry.blockedAt)) ? escape(stamp(entry.blockedAt)) : '时间未记录'}</p></div><button class="button" type="button" data-restore="${escape(entry.key)}" aria-label="恢复 ${escape(row?.name || entry.name)}">恢复</button></div>`;
@@ -64,6 +65,19 @@
     $('notice').textContent = message;
     $('notice').hidden = !message;
     $('notice').className = error ? 'error' : '';
+  }
+  function renderSearch(result) {
+    const found = RouterRank.search(snapshot, result, searchQuery);
+    const searching = Boolean(searchQuery.trim()) && tab !== 'blacklist';
+    $('search-summary').hidden = !searching;
+    $('clear-search').hidden = !searchQuery;
+    $('search-summary').textContent = found.rows.length || found.outside.length
+      ? `榜内 ${found.rows.length} 条 · 未上榜 ${found.outside.length} 条。名次为当前权重下的完整榜单排名。`
+      : '当前快照未找到该渠道。搜索范围为官方市场收录的 Codex Pro / gpt6 渠道；下架或未公开的渠道可能不在其中。';
+    $('search-outside').hidden = !searching || !found.outside.length;
+    $('search-outside').innerHTML = found.outside.map(r => `<article class="lookup-card"><div class="lookup-heading"><h3>${escape(r.name)}</h3><span class="tag warning">未上榜</span></div><p class="lookup-reason">${escape(r.reasons.join('；') || '不符合当前榜单范围')}，不参与排名与推荐。</p><p>gpt6 成功率 ${percent(r.success)} · ${windowLabel(r.modelWindowHours)} / ${escape(r.modelRequests ?? 0)} 次 · 缓存 ${percent(r.cache)}</p><p>平均 TTFT ${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + 's' : '—'}（全模型近 24h） · gpt6 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens</p>${modelTags(r)}${r.blockKey ? `<button class="button" type="button" data-search-restore="${escape(r.blockKey)}">恢复此渠道</button>` : ''}</article>`).join('');
+    $('search-outside').querySelectorAll('[data-search-restore]').forEach(b => b.addEventListener('click', () => restoreChannel(b.dataset.searchRestore)));
+    return found;
   }
   function setWeights(values) {
     const integers = values.map(Math.floor);
@@ -96,6 +110,7 @@
     try { result = RouterRank.rank(snapshot, configuration()); }
     catch (e) { lastResult = null; $('export').disabled = true; note(e.message, true); return; }
     lastResult = result;
+    const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
     $('updated').textContent = '行情 ' + stamp(time);
@@ -131,14 +146,15 @@
     $('board-description').textContent = tab === 'blacklist' ? '你的本地黑名单 · 可随时恢复 · 不跨浏览器同步' : tab === 'all' ? '按综合分排序 · 已排除黑名单 · 点击渠道查看各模型状态' : tab === 'eligible' ? '已通过推荐门槛 · 按综合分排序' : '显示未通过推荐门槛的渠道及原因';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
-    const allShown = tab === 'blacklist' ? [] : tab === 'all' ? result.rows : result[tab];
+    const allShown = (tab === 'blacklist' ? [] : tab === 'all' ? result.rows : result[tab]).filter(r => RouterRank.matchesQuery(r, searchQuery));
     pageResult = RouterRank.paginate(allShown, page, pageSize);
     page = pageResult.page;
     const shown = pageResult.rows;
     $('empty').hidden = shown.length > 0;
     $('empty').textContent = tab === 'all' ? (blacklist.entries.length ? '当前没有可显示的渠道。可在黑名单中恢复，或调整筛选条件。' : '没有符合当前筛选条件的渠道。') : tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区或黑名单。' : '没有处于观察区的渠道。';
-    $('rows').innerHTML = shown.map((r, i) => `<tr class="${r.id === selected ? 'selected' : ''}">
-      <td><div class="channel-cell"><span class="rank-number ${pageResult.start + i < 3 ? 'top' : ''}">${String(pageResult.start + i + 1).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
+    if (searchQuery.trim()) $('empty').textContent = found.rows.length ? '当前标签没有匹配结果，切换「全部」查看。' : found.outside.length ? '该渠道未上榜，原因见下方。' : '没有匹配的渠道。';
+    $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
+      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
       <td><span class="score-value">${format(r.score)}</span><div class="score-bar" aria-hidden="true">${keys.map(k => `<span class="${k}" style="width:${r.contributions[k]}%"></span>`).join('')}</div></td>
       <td>${escape(r.multiplier)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
       <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>gpt6</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="8"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
@@ -161,9 +177,9 @@
   function changePage(next) { page = next; render(); }
   function renderDetail() {
     const r = lastResult.rows.find(r => r.id === selected);
-    $('detail').hidden = !r || tab === 'blacklist';
-    if (!r || tab === 'blacklist') return;
-    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>${r.eligible ? '已通过门槛；排名仍受公开统计窗口影响。' : escape(r.reasons.join('；'))}</p></div><div class="detail-actions"><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
+    $('detail').hidden = !r || tab === 'blacklist' || !RouterRank.matchesQuery(r, searchQuery);
+    if ($('detail').hidden) return;
+    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过门槛；排名仍受公开统计窗口影响。' : escape(r.reasons.join('；'))}</p><p>gpt6 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 gpt-6-astra</p></div><div class="detail-actions"><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
       <div class="detail-grid"><div><label>gpt6 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>gpt6 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown">${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
@@ -176,6 +192,16 @@
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
   $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = .22; $('ttft-metric').value = 'ttftAvg'; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
+  $('channel-search').value = searchQuery;
+  function updateSearch(value) {
+    searchQuery = value; page = 1; tab = 'all'; selected = null;
+    const url = new URL(location.href);
+    if (value.trim()) url.searchParams.set('q', value.trim()); else url.searchParams.delete('q');
+    try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
+    render();
+  }
+  $('channel-search').addEventListener('input', e => updateSearch(e.target.value));
+  $('clear-search').addEventListener('click', () => { $('channel-search').value = ''; updateSearch(''); $('channel-search').focus(); });
   $('undo-block').addEventListener('click', () => { if (undoKey) restoreChannel(undoKey); });
   $('restore-all').addEventListener('click', () => { blacklist.clear(); undoKey = null; render(); blacklistFeedback('已恢复全部渠道。'); });
   window.addEventListener('storage', event => {

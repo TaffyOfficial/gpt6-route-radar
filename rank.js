@@ -10,7 +10,7 @@
     if (!Array.isArray(response.data) || !Number.isFinite(Date.parse(response.capturedAt))) throw Error('官方状态响应格式无效');
     if (Date.parse(response.capturedAt) < Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt)) return snapshot;
     const groups = new Map(response.data.map(g => [g.group_id, g]));
-    return { ...snapshot, liveCapturedAt: response.capturedAt, rows: snapshot.rows.map(r => {
+    const updateRow = r => {
       const g = groups.get(r.id) || {};
       const byModel = new Map((g.models || []).map(m => [m.model, m]));
       const m = byModel.get('gpt-6-astra') || {};
@@ -20,7 +20,8 @@
         latestGroupSuccess: g.success_rate ?? null, latestGroupRequests: g.request_count ?? 0, latestGroupStatus: g.status || 'unknown', groupWindowHours: windows.length === 1 ? windows[0] : null,
         series: m.series || [], seriesWindowHours: m.series_window ?? null,
         modelStats: (r.models || [r.model]).map(name => { const s = byModel.get(name) || {}; return { model: name, status: s.status || 'unknown', success: s.success_rate ?? null, requests: s.request_count ?? 0, windowHours: s.sample_window ?? null, cache: s.cache_hit_rate ?? null }; }) };
-    }) };
+    };
+    return { ...snapshot, liveCapturedAt: response.capturedAt, rows: snapshot.rows.map(updateRow), lookupRows: (snapshot.lookupRows || []).map(updateRow) };
   }
   function paginate(rows, requestedPage = 1, requestedSize = 20) {
     const size = requestedSize === 'all' ? Math.max(1, rows.length) : Math.max(1, Math.floor(Number(requestedSize) || 20));
@@ -84,7 +85,32 @@
       r.score = Object.values(r.contributions).reduce((a, b) => a + b, 0);
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
+    rows.forEach((r, i) => { r.overallRank = i + 1; });
     return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible), excluded: rows.filter(r => !r.eligible) };
+  }
+  function matchesQuery(row, query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return true;
+    if (/^\d+$/.test(q)) return String(row.channelId) === q;
+    return [row.name, row.id, row.channelId].some(value => String(value ?? '').toLowerCase().includes(q));
+  }
+  function search(snapshot, result, query) {
+    const rows = result.rows.filter(r => matchesQuery(r, query));
+    if (!String(query || '').trim()) return { rows, outside: [] };
+    const ranked = new Set(result.rows.map(r => r.id));
+    const blocked = new Set(result.config.blockedKeys);
+    const candidates = new Map([...(snapshot.rows || []), ...(snapshot.lookupRows || [])].map(r => [r.id, r]));
+    const outside = [...candidates.values()].filter(r => !ranked.has(r.id) && matchesQuery(r, query)).map(r => {
+      const reasons = [];
+      const blockKey = blocked.has('channel:' + r.channelId) ? 'channel:' + r.channelId : blocked.has('group:' + r.id) ? 'group:' + r.id : null;
+      if (blockKey) reasons.push('已被你拉黑');
+      if (!finite(r.multiplier)) reasons.push('缺少倍率');
+      else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于最低倍率 ${result.config.minMultiplier}×`);
+      if (r.source !== 'Codex Pro') reasons.push('不是 Codex Pro 渠道');
+      if (r.model !== 'gpt-6-astra') reasons.push('未列出 gpt-6-astra');
+      return { ...r, overallRank: null, blockKey, reasons };
+    });
+    return { rows, outside };
   }
   function plan(snapshot, input = {}, now = Date.now()) {
     const result = rank(snapshot, input, now);
@@ -92,5 +118,5 @@
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
     return { schemaVersion: 2, mode: 'recommendation_only', model: 'gpt-6-astra', source: 'Codex Pro', generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: result.config, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, name: r.name, multiplier: r.multiplier, score: +r.score.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
-  return { defaults, config, rank, plan, applyStatus, paginate };
+  return { defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
 });

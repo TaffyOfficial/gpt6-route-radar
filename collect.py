@@ -56,7 +56,7 @@ def normalize(groups, statuses, pricing, site, captured_at=None):
     price = next((m for m in pricing.get('priced_model_details', []) if m['model_name'] == MODEL), None)
     result = []
     for g in groups:
-        if g.get('source_label') != 'Codex Pro' or MODEL not in g.get('models', []) or g.get('multiplier', -1) < .22:
+        if g.get('source_label') != 'Codex Pro' or MODEL not in g.get('models', []):
             continue
         status = status_map.get(g['id'], {})
         m = next((m for m in status.get('models', []) if m.get('model') == MODEL), {})
@@ -72,19 +72,21 @@ def normalize(groups, statuses, pricing, site, captured_at=None):
             'groupRequests': g.get('request_count', 0), 'groupSuccess': g.get('success_rate'),
             'ttftAvg': g.get('avg_ttft_ms'), 'ttftP50': g.get('attempt_ttft_p50_ms'), 'ttftP95': g.get('attempt_ttft_p95_ms'),
             'ttftSamples': g.get('latency_sample_count', 0), 'ttftScope': 'group_all_models_24h',
-            'historicalCost': raw_cost / quota if isinstance(raw_cost, (int, float)) and raw_cost > 0 else None,
+            'historicalCost': raw_cost / quota if isinstance(raw_cost, (int, float)) and math.isfinite(raw_cost) and raw_cost > 0 else None,
             'maxConcurrency': g.get('max_concurrency'), 'currentConcurrency': g.get('current_concurrency'),
             'series': m.get('series', []), 'seriesWindowHours': m.get('series_window'),
             **status_fields(status, list(dict.fromkeys(g.get('models', [])))),
         })
     timestamp = captured_at or datetime.now(timezone.utc).isoformat()
+    rows = [r for r in result if isinstance(r['multiplier'], (int, float)) and r['multiplier'] >= .22]
+    lookup_rows = [r for r in result if r not in rows]
     return {
         'schemaVersion': 2, 'capturedAt': timestamp, 'liveCapturedAt': timestamp,
         'model': MODEL, 'source': 'Codex Pro', 'minMultiplier': .22,
-        'marketTotal': len(groups), 'count': len(result), 'complete': True,
+        'marketTotal': len(groups), 'count': len(rows), 'complete': True,
         'pricing': price, 'quotaPerUnit': quota, 'currency': 'USD platform quota',
         'sources': [BASE + group_path(1), BASE + '/api/group-status', BASE + '/api/pricing', BASE + '/api/status'],
-        'rows': result,
+        'rows': rows, 'lookupRows': lookup_rows,
     }
 
 

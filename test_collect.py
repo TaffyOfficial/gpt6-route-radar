@@ -65,6 +65,20 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(row['modelStats'][1]['success'], 96)
         self.assertEqual(snapshot['schemaVersion'], 2)
 
+    def test_below_floor_channels_are_searchable_but_not_ranked(self):
+        group = {'id': 'a', 'channel_id': '153', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .2, 'system_display_name': '153-Codex Pro-0.2x'}
+        out = collect.normalize([group], {'data': []}, {}, {'data': {'quota_per_unit': 500000}})
+        self.assertEqual(out['count'], 0)
+        self.assertEqual(out['rows'], [])
+        self.assertEqual(out['lookupRows'][0]['channelId'], '153')
+
+    def test_historical_cost_uses_only_gpt6_and_never_group_or_other_models(self):
+        group = {'id': 'a', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .22, 'system_display_name': 'test', 'avg_consumer_amount': 9999999, 'avg_consumer_amount_by_model': {'gpt-5.6-sol': 8888888, 'gpt-6-astra': 175000}}
+        args = ({'data': []}, {}, {'data': {'quota_per_unit': 500000}})
+        self.assertEqual(collect.normalize([group], *args)['rows'][0]['historicalCost'], .35)
+        del group['avg_consumer_amount_by_model']['gpt-6-astra']
+        self.assertIsNone(collect.normalize([group], *args)['rows'][0]['historicalCost'])
+
     def test_mixed_windows_are_not_labeled_as_one_hour(self):
         fields = collect.status_fields({'models': [{'model':'gpt-6-astra','sample_window':1}, {'model':'x','sample_window':6}]}, ['gpt-6-astra','x'])
         self.assertIsNone(fields['groupWindowHours'])

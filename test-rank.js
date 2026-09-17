@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { rank, plan, paginate, applyStatus } = require('./rank.js');
+const { rank, plan, paginate, applyStatus, search } = require('./rank.js');
 const now = Date.UTC(2026, 8, 17, 10);
 const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .22, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
 const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete: true });
@@ -80,5 +80,32 @@ test('scheduled Pages snapshots expose a separate 20-minute freshness profile', 
   assert.equal(p.scoring.freshnessProfile,'scheduled');
   assert.equal(Date.parse(p.validUntil),now+600000);
   assert.throws(()=>plan(s,{freshnessProfile:'scheduled'},now+600001),/刷新/);
+});
+test('search preserves full ranking and matches numeric IDs exactly across pages', () => {
+  const s = snap(Array.from({length:45}, (_,i) => make({id:'g'+i,channelId:String(i+100),name:'Channel '+(i+100),multiplier:.22+i*.01})));
+  s.rows.push(make({id:'lookalike',channelId:'1144',name:'Channel 1144',multiplier:1}));
+  const r = rank(s,{},now), original = r.rows.find(x=>x.channelId==='144');
+  const found = search(s,r,' 144 ');
+  assert.equal(found.rows.length,1);assert.equal(found.rows[0].overallRank,original.overallRank);assert.ok(original.overallRank>20);
+  assert.equal(search(s,r,'cHaNnEl').rows.length,46);
+  assert.equal(search(s,r,'absent').rows.length,0);
+  assert.equal(plan(s,{},now).channels.length,3);
+});
+test('search explains floor and blacklist exclusions without restoring or scoring them', () => {
+  const s = {...snap([make({channelId:'200'})]),lookupRows:[make({id:'low',channelId:'153',multiplier:.2,historicalCost:.00001})]};
+  const r = rank(s,{},now), found=search(s,r,'153');
+  assert.equal(found.rows.length,0);assert.equal(found.outside.length,1);assert.equal(found.outside[0].overallRank,null);
+  assert.match(found.outside[0].reasons[0],/0.2×.*0.22×/);
+  assert.equal(r.rows[0].components.cost,100);assert.equal(plan(s,{},now).channels[0].channel_id,'200');
+  const blocked=rank(s,{blockedKeys:['channel:200']},now);
+  assert.equal(search(s,blocked,'200').outside[0].blockKey,'channel:200');
+  assert.equal(search(s,blocked,'').outside.length,0);
+  const raised=rank(s,{minMultiplier:.3},now);
+  assert.match(search(s,raised,'200').outside[0].reasons[0],/0.3×/);
+});
+test('lookup-only channels receive current model status too', () => {
+  const s={...snap([]),lookupRows:[make({id:'low',channelId:'153',multiplier:.2})]};
+  const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'low',models:[{model:'gpt-6-astra',success_rate:97,request_count:50,cache_hit_rate:80}]}]});
+  assert.equal(updated.lookupRows[0].success,97);assert.equal(updated.rows.length,0);
 });
 console.log(`${tests} tests passed`);
