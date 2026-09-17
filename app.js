@@ -10,6 +10,7 @@
   let tab = 'all', selected = null, activePreset = 'balanced', lastResult = null, pendingRefresh = false;
   let page = 1, pageSize = 20, pageResult = null, pendingLive = false, refreshError = '', liveError = '';
   let lastLiveAttempt = 0, lastFullAttempt = 0;
+  let snapshotCheckAt = 0, snapshotCheckState = '';
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   let undoKey = null;
   let searchQuery = new URLSearchParams(location.search).get('q') || '';
@@ -113,12 +114,17 @@
     const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
+    if (staticHosting) {
+      $('collection-recovery').hidden = !result.stale;
+      const checkText = { newer: '已读取新数据', same: '暂无新数据', older: '返回旧版本，保留较新数据', error: '读取失败，保留原数据' }[snapshotCheckState];
+      $('snapshot-check').textContent = pendingRefresh ? '正在检查已发布快照…' : snapshotCheckAt ? `最近检查 ${stamp(snapshotCheckAt)} · ${checkText}` : '';
+    }
     $('updated').textContent = '行情 ' + stamp(time);
     $('live-updated').textContent = `${liveError ? '更新失败 · 保留 ' : result.liveStale ? '成功率已过期 · ' : '成功率 '}${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}`;
     $('live-updated').className = liveError || result.liveStale ? 'live-warning' : '';
     $('scope-count').textContent = `${snapshot.count} 条符合基础筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
     if (refreshError || liveError) note([refreshError, liveError].filter(Boolean).join('；'), true);
-    else if (result.stale) note(staticHosting ? '定时快照已超过 20 分钟。当前保留历史行情，请等待后台采集或检查新快照。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
+    else if (result.stale) note(staticHosting ? '后台快照已过期，暂无有效调度建议。反复检查不会启动采集，请查看下方采集任务。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
     else if (!online) note('当前为离线快照。运行 启动.ps1 可刷新行情。');
     else if (!pendingRefresh) note('');
     $('export').disabled = result.stale || !result.eligible.length;
@@ -244,6 +250,7 @@
     if (!staticHosting || pendingLive || pendingRefresh) return;
     pendingRefresh = true; lastLiveAttempt = Date.now(); refreshError = '';
     $('refresh').textContent = '正在检查…'; $('refresh').disabled = true;
+    $('snapshot-check').textContent = '正在检查已发布快照…';
     try {
       const url = new URL('snapshot.json', location.href);
       url.searchParams.set('t', String(Date.now()));
@@ -251,10 +258,13 @@
       if (!response.ok) throw Error('快照读取失败（' + response.status + '）');
       const data = await response.json();
       if (data.schemaVersion !== 2 || data.complete !== true || !Array.isArray(data.rows) || !Number.isFinite(Date.parse(data.capturedAt))) throw Error('快照格式无效');
-      if (!snapshot || Date.parse(data.capturedAt) >= Date.parse(snapshot.capturedAt)) snapshot = data;
+      const previousTimestamp = snapshot ? Date.parse(snapshot.capturedAt) : -Infinity;
+      const incomingTimestamp = Date.parse(data.capturedAt);
+      snapshotCheckState = incomingTimestamp > previousTimestamp ? 'newer' : incomingTimestamp === previousTimestamp ? 'same' : 'older';
+      if (incomingTimestamp >= previousTimestamp) snapshot = data;
       liveError = '';
-    } catch (e) { refreshError = e.message + '；保留上一份数据'; }
-    finally { pendingRefresh = false; $('refresh').textContent = refreshLabel; render(); }
+    } catch (e) { refreshError = e.message + '；保留上一份数据'; snapshotCheckState = 'error'; }
+    finally { snapshotCheckAt = Date.now(); pendingRefresh = false; $('refresh').textContent = refreshLabel; render(); }
   }
   $('refresh').addEventListener('click', refreshAll);
   $('auto-refresh').addEventListener('change', () => { render(); if ($('auto-refresh').checked) refreshLive(); });
