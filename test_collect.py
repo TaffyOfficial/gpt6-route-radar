@@ -81,6 +81,42 @@ class CollectorTests(unittest.TestCase):
         del group['avg_consumer_amount_by_model']['gpt-6-astra']
         self.assertIsNone(collect.normalize([group], *args)['rows'][0]['historicalCost'])
 
+    def test_selected_model_controls_source_verification_cost_and_status(self):
+        models = ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol']
+        for model in models:
+            with self.subTest(model=model):
+                source = 'Codex Pro' if model.startswith('gpt') else 'CC-Max'
+                group = {'id': 'a', 'models': [model, collect.MODEL], 'source_label': source,
+                         'multiplier': .3, 'system_display_name': 'test', 'verification_status': 'passed',
+                         'model_verification_results': [{'model': model, 'status': 'passed', 'listed': True}],
+                         'avg_consumer_amount_by_model': {model: 1000000, collect.MODEL: 123}}
+                statuses = {'data': [{'group_id': 'a', 'models': [
+                    {'model': model, 'success_rate': 97, 'request_count': 60, 'cache_hit_rate': 75},
+                    {'model': collect.MODEL, 'success_rate': 20, 'request_count': 1}]}]}
+                out = collect.normalize([group], statuses, {}, {'data': {'quota_per_unit': 500000}}, model=model)
+                row = out['rows'][0]
+                self.assertEqual((row['model'], row['source'], row['success'], row['cache'], row['historicalCost']),
+                                 (model, source, 97, 75, 2))
+                self.assertTrue(row['verified'])
+                self.assertIn('model=' + model, collect.group_path(1, model))
+                self.assertEqual('source=' in collect.group_path(1, model), source == 'Codex Pro')
+                group['model_verification_results'] = [{'model': collect.MODEL, 'status': 'passed', 'listed': True}]
+                del group['avg_consumer_amount_by_model'][model]
+                row = collect.normalize([group], statuses, {}, {'data': {'quota_per_unit': 500000}}, model=model)['rows'][0]
+                self.assertFalse(row['verified'])
+                self.assertIsNone(row['historicalCost'])
+
+    def test_collect_all_reuses_shared_responses_and_includes_every_model(self):
+        def one(model, shared):
+            self.assertIn('statuses', shared)
+            return {'model': model, 'complete': True, 'rows': []}
+        with patch.object(collect, 'get_json', return_value={'data': []}) as get, patch.object(collect, 'collect', side_effect=one) as run:
+            out = collect.collect_all()
+            self.assertEqual(get.call_count, 3)
+            self.assertEqual(run.call_count, 5)
+            self.assertEqual(out['model'], collect.MODEL)
+            self.assertEqual(set(out['modelSnapshots']), set(collect.MODELS) - {collect.MODEL})
+
     def test_mixed_windows_are_not_labeled_as_one_hour(self):
         fields = collect.status_fields({'models': [{'model':'gpt-6-astra','sample_window':1}, {'model':'x','sample_window':6}]}, ['gpt-6-astra','x'])
         self.assertIsNone(fields['groupWindowHours'])

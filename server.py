@@ -7,7 +7,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
-from collect import collect, save, get_json
+from collect import collect_all as collect, save, get_json
 
 ROOT = Path(__file__).resolve().parent
 LOCK = threading.Lock()
