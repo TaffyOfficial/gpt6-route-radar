@@ -1,6 +1,6 @@
 # GPT6 Route Radar · 渠道雷达
 
-[在线使用](https://taffyofficial.github.io/gpt6-route-radar/) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [采集与部署状态](https://github.com/TaffyOfficial/gpt6-route-radar/actions/workflows/pages.yml)
+[在线使用](https://taffyofficial.github.io/gpt6-route-radar/) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [采集与部署状态](https://github.com/TaffyOfficial/gpt6-route-radar/actions/workflows/refresh-pages.yml)
 
 MIT 开源。公开行情数据来自 CodeGo，数据权利归原提供方。
 
