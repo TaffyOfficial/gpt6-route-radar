@@ -84,7 +84,7 @@
     const rows = matches.map(r => {
       const reasons = [];
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
-      if (r.observing) reasons.push('平台观察中');
+      // The platform observation flag is informational, not an availability gate.
       if (r.modelStatus === 'failed') reasons.push('当前模型故障');
       if (!finite(r.modelRequests) || r.modelRequests < c.minSamples) reasons.push('当前模型样本不足');
       if (!finite(r.success) || r.success < c.minSuccess) reasons.push('当前模型成功率未达标');

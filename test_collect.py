@@ -42,6 +42,13 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNone(out['success'])
         self.assertEqual(out['modelRequests'], 0)
 
+    def test_platform_observation_is_only_set_when_explicitly_reported(self):
+        group = {'id': 'a', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .22, 'system_display_name': 'test'}
+        args = ({'data': []}, {}, {'data': {'quota_per_unit': 500000}})
+        self.assertFalse(collect.normalize([group], *args)['rows'][0]['observing'])
+        for value in [True, False, None]:
+            self.assertEqual(collect.normalize([{**group, 'observing': value}], *args)['rows'][0]['observing'], value is True)
+
     def test_quota_conversion_and_zero_spend(self):
         group = {'id': 'a', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .22, 'system_display_name': 'test', 'avg_consumer_amount_by_model': {'gpt-6-astra': 1000000}}
         args = ({'data': []}, {}, {'data': {'quota_per_unit': 500000}})

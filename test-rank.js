@@ -14,8 +14,21 @@ test('zero/missing latency and missing cache never rank as free/fast', () => {
   for (const change of [{ ttftAvg: 0 }, { ttftAvg: null }, { ttftSamples: 0 }, { cache: null }]) assert.equal(rank(snap([make(change)]), {}, now).eligible.length, 0);
 });
 test('zero measured cache is valid, not missing', () => assert.equal(rank(snap([make({ cache: 0 })]), {}, now).eligible.length, 1));
-test('current model failure, low sample, observing and full capacity gated', () => {
-  for (const change of [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { observing: true }, { verified: false }, { maxConcurrency: 3, currentConcurrency: 3 }]) assert.equal(rank(snap([make(change)]), {}, now).eligible.length, 0);
+test('current model failure, low sample and full capacity remain gated while platform observes', () => {
+  for (const change of [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }]) assert.equal(rank(snap([make({ observing: true, ...change })]), {}, now).eligible.length, 0);
+});
+test('platform observation alone changes neither eligibility, score, ranking nor route selection', () => {
+  const s = snap([make({ id: '550', channelId: '550', multiplier: .2888, cache: 91.62, ttftAvg: 22272, success: 95.652, modelRequests: 23 }), make({ id: 'other', multiplier: .7, ttftAvg: 30000 })]);
+  const observing = { ...s, rows: s.rows.map(r => ({ ...r, observing: true })) };
+  const input = { priceOverrides: [{ key: 'channel:550', multiplier: .25 }] };
+  const before = rank(s, input, now), after = rank(observing, input, now);
+  assert.deepEqual(after.rows.map(r => [r.id, r.overallRank, r.score, r.eligible, r.reasons]), before.rows.map(r => [r.id, r.overallRank, r.score, r.eligible, r.reasons]));
+  assert.equal(after.rows[0].observing, true);
+  assert.equal(after.rows[0].multiplier, .25);
+  assert.ok(after.rows[0].score >= 50);
+  assert.ok(after.rows[0].score > rank(observing, {}, now).rows.find(r => r.id === '550').score);
+  assert.deepEqual(plan(observing, input, now).channels, plan(s, input, now).channels);
+  assert.equal(plan(observing, input, now).channels[0].channel_id, '550');
 });
 test('lower price and lower latency improve their scores', () => {
   const r = rank(snap([make(), make({ id: 'b', multiplier: .40, ttftAvg: 20000 })]), {}, now);
@@ -45,7 +58,7 @@ test('all-channel ranking retains low success and low sample channels with score
   assert.ok(r.rows.every(row => Number.isFinite(row.score)));
 });
 test('even the best observation score stays below the weakest eligible channel', () => {
-  const changes = [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { observing: true }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
+  const changes = [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
   const s = snap([make({ id: 'eligible', cache: 0 }), ...changes.map((change, i) => make({ id: 'excluded-' + i, cache: 100, ...change }))]);
   const r = rank(s, { weights: { price: 0, ttft: 0, cache: 100, effective: 0, cost: 0 } }, now);
   assert.equal(r.rows[0].id, 'eligible'); assert.equal(r.rows[0].score, 50);
@@ -64,7 +77,7 @@ test('fixed bands retain weighted base score, ordering and exact score-bar contr
   assert.equal(p.channels[0].baseScore, 73.5); assert.equal(p.channels[0].score, 86.75);
 });
 test('observation bands stay fixed when other channels or recommendation filters change', () => {
-  const observation = make({ id: 'watch', observing: true, historicalCost: null });
+  const observation = make({ id: 'watch', modelRequests: 10, historicalCost: null });
   const alone = rank(snap([observation]), {}, now).rows[0];
   const together = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), {}, now);
   const raised = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), { minSuccess: 99 }, now);

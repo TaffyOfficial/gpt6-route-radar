@@ -31,6 +31,24 @@
   let snapshotCheckAt = 0, snapshotCheckState = '';
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   const prices = RouterPrices.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
+  const minimumMultiplierKey = 'gpt6-route-radar:min-multiplier:v1';
+  const minimumMultiplierHint = '保存在当前浏览器，刷新后保留。';
+  function readMinimumMultiplier() {
+    const input = $('min-multiplier');
+    try {
+      const saved = window.localStorage.getItem(minimumMultiplierKey);
+      input.value = saved ?? RouterRank.defaults.minMultiplier;
+      if (!input.value || !input.checkValidity()) input.value = RouterRank.defaults.minMultiplier;
+      $('min-multiplier-hint').textContent = minimumMultiplierHint;
+    } catch { $('min-multiplier-hint').textContent = '无法读取浏览器设置；当前使用页面显示的倍率门槛。'; }
+  }
+  function saveMinimumMultiplier() {
+    try {
+      window.localStorage.setItem(minimumMultiplierKey, $('min-multiplier').value);
+      $('min-multiplier-hint').textContent = minimumMultiplierHint;
+    } catch { $('min-multiplier-hint').textContent = '无法保存倍率门槛；本页有效，刷新后需要重新设置。'; }
+  }
+  readMinimumMultiplier();
   let priceEditing = null, priceMessage = '';
   let undoKey = null;
   let searchQuery = new URLSearchParams(location.search).get('q') || '';
@@ -43,6 +61,7 @@
   const stamp = t => new Date(t).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   const windowLabel = h => h == null ? '窗口未标注' : `近 ${h}h`;
   const statusLabel = s => ({healthy:'正常',unstable:'波动',failed:'故障',unknown:'无样本'}[s] || '未知');
+  const observationHint = '平台观测中 · 仅作提示，不影响评分或推荐';
   const effectiveLabel = r => r.cache === 0 ? '∞' : format(r.effectiveMultiplier, 3);
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
@@ -223,6 +242,7 @@
     try { result = RouterRank.rank(snapshot, configuration()); }
     catch (e) { lastResult = null; $('export').disabled = true; note(e.message, true); return; }
     lastResult = result;
+    $('scope-multiplier').textContent = `公开倍率 ≥ ${format(result.config.minMultiplier, 2)}`;
     const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
@@ -234,7 +254,7 @@
     $('updated').textContent = '行情 ' + stamp(time);
     $('live-updated').textContent = `${liveError ? '更新失败 · 保留 ' : result.liveStale ? '成功率已过期 · ' : '成功率 '}${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}`;
     $('live-updated').className = liveError || result.liveStale ? 'live-warning' : '';
-    $('scope-count').textContent = `${activeSnapshot().count} 条符合基础筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
+    $('scope-count').textContent = `${result.rows.length + result.blocked.length} 条符合当前筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
     if (refreshError || liveError) note([refreshError, liveError].filter(Boolean).join('；'), true);
     else if (activeSnapshot().complete !== true) note('当前快照尚未包含所选模型的完整数据，请刷新行情或等待后台采集。');
     else if (result.stale) note(staticHosting ? '后台快照已过期，暂无有效调度建议。反复检查不会启动采集，请查看下方采集任务。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
@@ -273,7 +293,7 @@
     $('empty').textContent = tab === 'all' ? (blacklist.entries.length ? '当前没有可显示的渠道。可在黑名单中恢复，或调整筛选条件。' : '没有符合当前筛选条件的渠道。') : tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区或黑名单。' : '没有处于观察区的渠道。';
     if (searchQuery.trim()) $('empty').textContent = found.rows.length ? '当前标签没有匹配结果，切换「全部」查看。' : found.outside.length ? '该渠道未上榜，原因见下方。' : '没有匹配的渠道。';
     $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
-      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div></div></div></td>
+      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
       <td><span class="score-value${r.eligible ? '' : ' score-downgraded'}" title="基础分 ${format(r.baseScore)}；${r.eligible ? '通过门槛：50 + 基础分 × 0.5' : '未通过门槛：基础分 × 0.49'}">${format(r.score)}</span>${r.eligible ? '' : '<small class="metric-note score-downgraded">已降分</small>'}<div class="score-bar" aria-hidden="true">${['gate', ...keys].map(k => `<span class="${k}" style="width:${r.scoreContributions[k]}%"></span>`).join('')}</div></td>
       <td class="price-cell"><span>${escape(r.multiplier)} ×</span>${r.priceSource === 'personal' ? `<small class="personal-price">个人 · 公开 ${escape(r.publicMultiplier)}×</small>` : ''}<button class="text-button price-edit" type="button" data-price="${escape(r.id)}" aria-label="修改 ${escape(r.channelId)} 号渠道价格">改价</button></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
       <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
@@ -299,7 +319,7 @@
     const r = lastResult.rows.find(r => r.id === selected);
     $('detail').hidden = !r || tab === 'blacklist' || !RouterRank.matchesQuery(r, searchQuery);
     if ($('detail').hidden) return;
-    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p><p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${escape(r.multiplier)}× · 公开报价 ${escape(r.publicMultiplier)}×</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
+    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p>${r.observing ? `<p>${observationHint}</p>` : ''}<p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${escape(r.multiplier)}× · 公开报价 ${escape(r.publicMultiplier)}×</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
       <div class="detail-grid"><div><label>缓存折算倍率 / 越低越好</label><b>${effectiveLabel(r)}×</b><p>${escape(r.multiplier)} ÷ ${percent(r.cache)}；比较指标，非实际账单倍率。</p></div><div><label>${escape(modelLabel())} 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>${escape(modelLabel())} 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown"><span>基础分 ${format(r.baseScore)}：</span>${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
@@ -309,7 +329,18 @@
     $('detail-block').addEventListener('click', () => blockChannel(r.id));
   }
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
-  for (const id of ['min-success', 'min-samples', 'min-multiplier', 'ttft-metric']) $(id).addEventListener('change', render);
+  for (const id of ['min-success', 'min-samples', 'ttft-metric']) $(id).addEventListener('change', render);
+  for (const eventName of ['input', 'change']) $('min-multiplier').addEventListener(eventName, event => {
+    if (!$('min-multiplier').value || !$('min-multiplier').checkValidity()) { if (event.type === 'change') render(); return; }
+    saveMinimumMultiplier();
+    // Avoid rebuilding the clicked row again when an input change loses focus.
+    if (lastResult?.config.minMultiplier === Number($('min-multiplier').value)) return;
+    page = 1; priceMessage = ''; render();
+  });
+  window.addEventListener('storage', event => {
+    if (event.key !== minimumMultiplierKey && event.key !== null) return;
+    readMinimumMultiplier(); page = 1; priceMessage = ''; render();
+  });
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
   $('model-select').addEventListener('change', event => {
     selectedModel = event.target.value; selected = null; page = 1; tab = 'all';
@@ -318,7 +349,7 @@
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
-  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = RouterRank.defaults.minMultiplier; $('ttft-metric').value = 'ttftAvg'; render(); });
+  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = RouterRank.defaults.minMultiplier; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {

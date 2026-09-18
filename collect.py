@@ -77,7 +77,7 @@ def normalize(groups, statuses, pricing, site, captured_at=None, model=MODEL):
             'id': g['id'], 'channelId': g.get('channel_id'), 'name': g['system_display_name'],
             'source': g['source_label'], 'model': model, 'models': list(dict.fromkeys(g.get('models', []))), 'multiplier': g['multiplier'],
             'lifecycle': g.get('lifecycle_status'), 'verified': g.get('verification_status') == 'passed' and tested.get('status') == 'passed' and tested.get('listed') is True,
-            'observing': g.get('observing', True), 'modelStatus': m.get('status', 'unknown'),
+            'observing': g.get('observing') is True, 'modelStatus': m.get('status', 'unknown'),
             'modelRequests': m.get('request_count', 0), 'modelWindowHours': m.get('sample_window'),
             'success': m.get('success_rate'), 'cache': m.get('cache_hit_rate'),
             'groupRequests': g.get('request_count', 0), 'groupSuccess': g.get('success_rate'),
