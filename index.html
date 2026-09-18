@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>多模型渠道雷达</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="runtime.js" defer></script>
+  <script src="snapshot.js" defer></script>
+  <script src="prices.js" defer></script>
+  <script src="rank.js" defer></script>
+  <script src="blacklist.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="渠道雷达首页"><span class="brand-symbol">R</span><span>渠道雷达 <small>ROUTE RADAR</small></span></a>
+      <a href="https://shu26.cfd/market" target="_blank" rel="noreferrer">CodeGo 市场 ↗</a>
+    </header>
+    <main>
+      <div class="intro">
+        <div><div class="eyebrow"><span id="model-scope-title">Codex Pro / GPT6 Astra</span></div><h1>把每一条请求，<br class="mobile-break">交给合适的渠道。</h1><p>价格、首字延迟、缓存一起看。<span data-model-label>GPT6 Astra</span> 历史实扣只作辅助。</p></div>
+        <div class="refresh-box"><button id="refresh" class="button primary" type="button">刷新数据 ↻</button><span id="updated">读取快照…</span><span id="live-updated" aria-live="polite">成功率等待更新</span><label class="auto-refresh"><input id="auto-refresh" type="checkbox" checked><span id="auto-refresh-label">成功率每 60 秒更新</span></label></div>
+      </div>
+      <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span id="source-scope">仅 Codex Pro</span><span data-model-id>gpt-6-astra</span><span id="scope-multiplier">公开倍率 ≥ 0.20</span><span id="scope-count"></span></div>
+      <div id="hosting-note" class="hosting-note" hidden>线上手动快照 · 由维护者在服务器采集并推送更新。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <div id="collection-recovery" class="collection-recovery" hidden>尚未发布新数据。请等待维护者从服务器推送更新，完成后再检查快照。</div>
+      <div id="blacklist-feedback" class="blacklist-feedback" role="status" aria-live="polite" hidden><span id="blacklist-feedback-text"></span><button id="undo-block" type="button" class="text-button" hidden>撤销拉黑</button></div>
+      <div id="price-feedback" class="price-feedback" role="status" aria-live="polite" hidden></div>
+      <section class="workspace">
+        <aside class="settings">
+          <div class="model-picker"><label class="input-label" for="model-select">选择模型</label><select id="model-select" aria-describedby="model-help"></select><p id="model-help" class="field-help">成功率、缓存和实扣按所选模型计算。</p></div>
+          <div class="section-title"><h2>你的取舍</h2><button id="reset" class="text-button" type="button">恢复默认</button></div>
+          <div class="presets" aria-label="评分偏好">
+            <button type="button" data-preset="balanced" aria-pressed="true">均衡</button><button type="button" data-preset="fast" aria-pressed="false">速度优先</button><button type="button" data-preset="cheap" aria-pressed="false">价格优先</button>
+          </div>
+          <div class="weight-field"><label for="weight-price"><span><i class="swatch price"></i>原始倍率（额外偏好）</span><output id="out-price">0%</output></label><input id="weight-price" type="range" min="0" max="100" step="1" value="0"></div>
+          <div class="weight-field"><label for="weight-ttft"><span><i class="swatch ttft"></i>TTFT / 首字</span><output id="out-ttft">35%</output></label><input id="weight-ttft" type="range" min="0" max="100" step="1" value="35"></div>
+          <div class="weight-field"><label for="weight-cache"><span><i class="swatch cache"></i>缓存（额外偏好）</span><output id="out-cache">0%</output></label><input id="weight-cache" type="range" min="0" max="100" step="1" value="0"></div>
+          <div class="weight-field"><label for="weight-effective"><span><i class="swatch effective"></i>缓存折算倍率</span><output id="out-effective">60%</output></label><input id="weight-effective" type="range" min="0" max="100" step="1" value="60"><p class="field-help">倍率 ÷ 缓存命中率，越低越好。例：0.2 ÷ 80% = 0.25；用于比较，不是账单倍率。</p></div>
+          <div class="weight-field"><label for="weight-cost"><span><i class="swatch cost"></i><span data-model-label>GPT6 Astra</span> 历史实扣</span><output id="out-cost">5%</output></label><input id="weight-cost" type="range" min="0" max="10" step="1" value="5"><p class="field-help">仅所选模型；最多 10%，避免其他用户的请求结构左右排名。</p></div>
+          <div class="divider"></div>
+          <button id="manage-prices" class="button manage-prices" type="button">个人价格 0</button>
+          <h2>推荐门槛</h2>
+          <label class="input-label" for="min-success"><span data-model-label>GPT6 Astra</span> 最低成功率 <span>%</span></label><input id="min-success" type="number" min="0" max="100" step="1" value="95">
+          <label class="input-label" for="min-samples"><span data-model-label>GPT6 Astra</span> 最少请求样本</label><input id="min-samples" type="number" min="1" max="100000" step="1" value="20">
+          <label class="input-label" for="min-multiplier">最低公开倍率</label><input id="min-multiplier" type="number" min="0.20" max="100" step="0.01" value="0.20" aria-describedby="min-multiplier-hint"><p id="min-multiplier-hint" class="field-help">保存在当前浏览器，刷新后保留。</p>
+          <label class="input-label" for="ttft-metric">TTFT 统计口径</label><select id="ttft-metric"><option value="ttftAvg">平均 TTFT</option><option value="ttftP50">P50 · 典型延迟</option><option value="ttftP95">P95 · 尾部延迟</option></select>
+          <p class="field-help">未过门槛降至 0–49 分；通过后为 50–100 分。平台观测标记仅作提示。TTFT 为渠道全模型近 24h。</p>
+        </aside>
+        <div class="results">
+          <section class="recommendation" aria-labelledby="recommend-title">
+            <div class="rec-top"><span class="eyebrow">当前建议</span><span id="rec-state" class="tag">计算中</span></div>
+            <h2 id="recommend-title">正在计算…</h2><p id="recommend-copy"></p>
+            <div class="route-chain" id="route-chain"></div>
+            <div class="rec-footer"><span>会话优先固定渠道，保留缓存；故障后再切换。</span><button id="export" class="button" type="button">导出调度建议 ↓</button></div>
+          </section>
+          <section class="board" aria-labelledby="board-title">
+            <div class="board-head"><div><h2 id="board-title">渠道排行榜 <span id="eligible-count"></span></h2><p id="board-description">全部符合条件的渠道，按综合分排序</p></div><div class="tabs" role="group" aria-label="渠道列表"><button id="tab-all" type="button" aria-pressed="true">全部</button><button id="tab-eligible" type="button" aria-pressed="false">可推荐</button><button id="tab-excluded" type="button" aria-pressed="false">观察区</button><button id="tab-blacklist" type="button" aria-pressed="false">黑名单 0</button></div></div>
+            <div class="channel-search"><label for="channel-search">查找渠道</label><div class="search-input-row"><input id="channel-search" type="search" placeholder="输入编号，如 153，或渠道名 / 分组 ID" autocomplete="off" aria-describedby="search-help"><button id="clear-search" class="text-button" type="button" hidden>清空</button></div><p id="search-help">编号精确查找，名称模糊搜索；保留完整榜单名次，未上榜会说明原因。</p><p id="search-summary" role="status" aria-live="polite" hidden></p></div>
+            <section id="blacklist-panel" class="blacklist-panel" aria-label="黑名单管理" hidden><div class="blacklist-heading"><p>仅保存在当前浏览器。拉黑渠道不参与榜单、推荐和调度导出。</p><button id="restore-all" type="button" class="button">全部恢复</button></div><div id="blacklist-list"></div><p id="blacklist-empty">还没有拉黑渠道。点击渠道旁的「拉黑」即可。</p></section>
+            <div class="board-toolbar"><span id="live-caption">成功率来源：CodeGo /api/group-status</span><label for="page-size">每页 <select id="page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="100">100 条</option><option value="all">全部 · 不限</option></select></label></div>
+            <div class="table-wrap"><table><thead><tr><th scope="col">排名 / 渠道</th><th scope="col">综合分 <small>门槛已计入</small></th><th scope="col">价格倍率</th><th scope="col">缓存折算倍率<small>倍率 ÷ 命中率 · 越低越好</small></th><th scope="col" id="ttft-heading">平均 TTFT</th><th scope="col"><span data-model-label>GPT6 Astra</span> 缓存</th><th scope="col">最新成功率 <small><span data-model-label>GPT6 Astra</span> / 渠道整体</small></th><th scope="col">渠道 24h <small>成功率</small></th><th scope="col"><span data-model-label>GPT6 Astra</span> 历史实扣 <small>$/1M tokens</small></th></tr></thead><tbody id="rows"></tbody></table><div id="empty" hidden></div></div>
+            <nav class="pagination" aria-label="渠道分页"><span id="page-summary" aria-live="polite"></span><div class="page-controls"><button id="first-page" type="button" class="button">首页</button><button id="prev-page" type="button" class="button">上一页</button><span id="page-numbers"></span><button id="next-page" type="button" class="button">下一页</button><button id="last-page" type="button" class="button">末页</button><label for="page-jump">跳至 <input id="page-jump" type="number" min="1" value="1"> 页</label><button id="go-page" class="button" type="button">前往</button></div></nav>
+            <section id="search-outside" class="search-outside" aria-label="未上榜渠道" hidden></section>
+            <div class="legend"><span>综合分构成</span><span><i class="swatch gate"></i>推荐门槛</span><span><i class="swatch price"></i>价格</span><span><i class="swatch ttft"></i>TTFT</span><span><i class="swatch cache"></i>缓存</span><span><i class="swatch effective"></i>缓存折算倍率</span><span><i class="swatch cost"></i><span data-model-label>GPT6 Astra</span> 历史实扣</span><span class="row-hint">点渠道名查看依据</span></div>
+          </section>
+          <section id="detail" class="detail" hidden aria-live="polite"></section>
+          <details class="method"><summary>排名怎么计算？数据有哪些局限？</summary><div class="method-body">
+            <p><b>推荐门槛计入综合分。</b>当前来源范围内、支持所选模型、倍率 ≥ 0.20 的渠道都显示并评分，不限制总条数。通过验证、无当前故障、并发未满、样本与成功率达标且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。平台“观测中”标记只作提示，不影响评分或推荐。</p>
+            <p><b>黑名单仅对当前浏览器生效。</b>拉黑后渠道从榜单、推荐和新导出的调度建议中移除；「黑名单」中可恢复。刷新行情、改名和价格变化不会解除拉黑。清除网站存储会清除名单，不跨设备同步，也不修改 CodeGo 账户。</p>
+            <p><b>基础分默认：缓存折算倍率 60%、TTFT 35%、实扣 5%。</b>原始倍率和缓存的独立权重默认为 0，避免重复计算；手工开启时表示额外偏好。价格分 = 100 × 0.20 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；缓存折算倍率 = 倍率 ÷（缓存命中百分数 / 100），该项分数 = 100 × 0.20 / 缓存折算倍率，最高 100 分。零命中显示 ∞，缺失显示 —，两者该项均记 0 分；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。各项按权重相加得到基础分；通过门槛时综合分 = 50 + 基础分 × 0.5，未通过时 = 基础分 × 0.49。分数不是成功概率。</p>
+            <p><b>个人价格仅保存在当前浏览器。</b>按渠道编号记住倍率，适用于该渠道所有模型；行情更新不覆盖。筛选仍按公开倍率，个人倍率用于价格、折算倍率、排名和调度导出。恢复评分默认值保留个人价格，可单独恢复公开价。<span data-model-label>GPT6 Astra</span> 历史实扣仍是平台公开的所选模型每百万实际 token 平均扣费，不随个人报价调整，也不代表实际充值成本。</p>
+            <p><b>TTFT 有局限。</b>公开市场给的是渠道全模型近 24h 的平均/P50/P95，不是 <span data-model-label>GPT6 Astra</span> 专属 TTFT。成功率与样本量来自单模型 sample_window；缓存来自同一模型条目，接口没有单独说明缓存的统计窗口或分母。</p>
+            <p id="refresh-method"><b>最新成功率来自官方状态接口。</b>本地页面保持打开且可见时每 60 秒读取 /api/group-status，行情每 5 分钟刷新。数字是滚动统计，不是单次探测；更新失败保留旧值并提示。</p>
+            <p><b>缓存也受负载影响。</b>当前是公开行情排名。正式调度应逐步改用你的实际请求指标，并保留会话粘性。同一会话不要每条请求追逐榜首。</p>
+            <p id="freshness-method"><b>调度建议是配置草案。</b>导出包含前三名、优先级、60 秒故障冷却与最多 2 次尝试建议。这里不代理模型请求、不修改账户路由池；行情超过 10 分钟或成功率超过 3 分钟，禁用调度导出。</p>
+            <div class="source-links"><a id="market-source" href="https://shu26.cfd/api/marketplace/groups?source=Codex%20Pro&amp;model=gpt-6-astra&amp;page=1&amp;page_size=20" target="_blank" rel="noreferrer">市场接口 ↗</a><a href="https://shu26.cfd/api/group-status" target="_blank" rel="noreferrer">单模型状态 ↗</a><a href="https://shu26.cfd/api/pricing" target="_blank" rel="noreferrer">模型报价 ↗</a></div>
+          </div></details>
+        </div>
+      </section>
+      <footer>MULTI-MODEL ROUTE RADAR <span id="footer-mode">本地排行榜 · 公开行情 · 无需 Key</span></footer>
+    </main>
+  </div>
+  <dialog id="price-dialog" class="price-dialog" aria-labelledby="price-title">
+    <form id="price-form">
+      <div class="price-dialog-heading"><h2 id="price-title">渠道价格</h2><button id="price-cancel" class="text-button" type="button">取消</button></div>
+      <p id="price-channel"></p><p id="price-public"></p>
+      <label for="personal-multiplier">个人倍率 ×</label>
+      <input id="personal-multiplier" type="number" min="0.000001" max="100" step="any" required inputmode="decimal" aria-describedby="price-scope">
+      <p id="price-scope">当前浏览器 · 同一渠道所有模型</p>
+      <p id="price-preview"></p><p id="price-impact" role="status" aria-live="polite"></p><p id="price-error" class="price-error" role="alert" hidden></p>
+      <div class="price-dialog-actions"><button id="price-restore" class="button" type="button">恢复公开价</button><button class="button primary" type="submit">保存价格</button></div>
+    </form>
+  </dialog>
+  <dialog id="prices-dialog" class="price-dialog" aria-labelledby="prices-title">
+    <div class="price-dialog-heading"><h2 id="prices-title">个人价格</h2><button id="prices-close" class="text-button" type="button">关闭</button></div>
+    <p>仅保存在当前浏览器，清除网站数据后会丢失。</p>
+    <div id="saved-prices"></div><p id="prices-empty">暂无个人价格</p>
+    <div class="price-dialog-actions"><button id="prices-clear" class="button" type="button">全部恢复公开价</button></div>
+  </dialog>
+</body>
+</html>
