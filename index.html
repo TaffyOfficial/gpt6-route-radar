@@ -92,7 +92,7 @@
       <label for="personal-multiplier">个人倍率 ×</label>
       <input id="personal-multiplier" type="number" min="0.000001" max="100" step="any" required inputmode="decimal" aria-describedby="price-scope">
       <p id="price-scope">当前浏览器 · 同一渠道所有模型</p>
-      <p id="price-preview"></p><p id="price-error" class="price-error" role="alert" hidden></p>
+      <p id="price-preview"></p><p id="price-impact" role="status" aria-live="polite"></p><p id="price-error" class="price-error" role="alert" hidden></p>
       <div class="price-dialog-actions"><button id="price-restore" class="button" type="button">恢复公开价</button><button class="button primary" type="submit">保存价格</button></div>
     </form>
   </dialog>

@@ -75,6 +75,28 @@
     const cache = priceEditing?.cache;
     const effective = valid ? RouterRank.effectiveMultiplier({multiplier:value, cache}) : null;
     $('price-preview').textContent = valid ? `缓存 ${percent(cache)} · 折算倍率 ${cache === 0 ? '∞' : format(effective, 3)}×` : '';
+    $('price-impact').textContent = '';
+    if (valid && priceEditing && snapshot) {
+      try {
+        const c = configuration(), key = RouterPrices.key(priceEditing);
+        const before = RouterRank.rank(snapshot, c).rows.find(row => RouterPrices.key(row) === key);
+        const after = RouterRank.rank(snapshot, { ...c, priceOverrides: [...c.priceOverrides.filter(entry => entry.key !== key), { key, multiplier: value }] }).rows.find(row => RouterPrices.key(row) === key);
+        $('price-impact').textContent = describePriceImpact(before, after, c);
+      } catch { $('price-impact').textContent = '请先检查榜单筛选条件。'; }
+    }
+  }
+  function describePriceImpact(before, after, c) {
+    if (!before || !after) return '该渠道不在当前榜单内，个人价格不会改变公开倍率筛选或黑名单。';
+    const change = `第 ${before.overallRank} → ${after.overallRank} 名 · ${format(before.score, 2)} → ${format(after.score, 2)} 分。`;
+    const reasons = [];
+    if (!after.eligible) reasons.push('仍在观察区：' + after.reasons.join('、') + '。');
+    if (before.multiplier === after.multiplier) reasons.push('倍率与当前生效值相同。');
+    else if (after.score === before.score) {
+      if (!c.weights.price && !c.weights.effective) reasons.push('原始倍率和缓存折算权重均为 0，改价不影响分数。');
+      else if (!c.weights.price && after.effectiveMultiplier == null) reasons.push('缺少有效缓存命中，折算项记 0 分。');
+      else reasons.push('当前启用的价格评分项都在满分区间，改价未改变分数。');
+    } else if (before.overallRank === after.overallRank) reasons.push((format(before.score, 2) === format(after.score, 2) ? '分数变化不足 0.01 分' : '分数已变化') + '，但尚未与其他渠道交换名次。');
+    return change + ' ' + reasons.join('');
   }
   function editPrice(id) {
     const row = priceRows().find(row => row.id === id);
@@ -97,9 +119,13 @@
     event.preventDefault();
     if (!priceEditing || !$('price-form').reportValidity()) return;
     try {
+      const key = RouterPrices.key(priceEditing);
+      const before = lastResult?.rows.find(row => RouterPrices.key(row) === key);
       prices.set(priceEditing, $('personal-multiplier').valueAsNumber);
-      priceMessage = '个人价格已保存，排名已重新计算。';
       $('price-dialog').close(); render();
+      const after = lastResult?.rows.find(row => RouterPrices.key(row) === key);
+      priceMessage = `${priceEditing.channelId || priceEditing.name} · ${modelLabel()}：` + describePriceImpact(before, after, { weights });
+      renderPrices();
     } catch { $('price-error').textContent = '请输入大于 0、不超过 100 的倍率。'; $('price-error').hidden = false; }
   });
   $('price-cancel').addEventListener('click', () => $('price-dialog').close());
