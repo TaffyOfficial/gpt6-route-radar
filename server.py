@@ -64,7 +64,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(live_status())
             except Exception as error:
                 return self.send_json({'error': '官方状态读取失败：' + str(error)}, 502)
-        if path not in {'/', '/index.html', '/app.js', '/rank.js', '/blacklist.js', '/style.css', '/runtime.js', '/snapshot.js', '/snapshot.json', '/favicon.ico'}:
+        if path not in {'/', '/index.html', '/app.js', '/rank.js', '/blacklist.js', '/prices.js', '/style.css', '/runtime.js', '/snapshot.js', '/snapshot.json', '/favicon.ico'}:
             return self.send_json({'error': 'Not found'}, 404)
         return super().do_GET()
 

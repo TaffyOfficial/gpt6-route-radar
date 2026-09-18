@@ -31,6 +31,7 @@ jobs:
         run: |
           node test-rank.js
           node test-blacklist.js
+          node test-prices.js
           python -m unittest test_collect.py test_pages.py test_trigger.py
       - name: Collect public market and build static site
         run: python build_pages.py

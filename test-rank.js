@@ -56,12 +56,12 @@ test('even the best observation score stays below the weakest eligible channel',
 test('fixed bands retain weighted base score, ordering and exact score-bar contributions', () => {
   const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', success: 90 })]), {}, now);
   assert.deepEqual(r.rows.map(row => row.id), ['a', 'b', 'c']);
-  assert.equal(r.rows[0].baseScore, 76.5); assert.equal(r.rows[0].score, 88.25);
+  assert.equal(r.rows[0].baseScore, 73.5); assert.equal(r.rows[0].score, 86.75);
   assert.equal(r.rows[2].score, r.rows[2].baseScore * .49);
   for (const row of r.rows) assert.ok(Math.abs(Object.values(row.scoreContributions).reduce((a, b) => a + b, 0) - row.score) < 1e-10);
   const p = plan(snap([make()]), {}, now);
   assert.equal(p.scoring.method, 'eligibility_bands_v1');
-  assert.equal(p.channels[0].baseScore, 76.5); assert.equal(p.channels[0].score, 88.25);
+  assert.equal(p.channels[0].baseScore, 73.5); assert.equal(p.channels[0].score, 86.75);
 });
 test('observation bands stay fixed when other channels or recommendation filters change', () => {
   const observation = make({ id: 'watch', observing: true, historicalCost: null });

@@ -1,7 +1,7 @@
 (function (root, factory) {
-  if (typeof module === 'object' && module.exports) module.exports = factory();
-  else root.RouterRank = factory();
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./prices.js'));
+  else root.RouterRank = factory(root.RouterPrices);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (prices) {
   'use strict';
   const models = [
     { id: 'gpt-6-astra', label: 'GPT6 Astra', source: 'Codex Pro' },
@@ -16,7 +16,7 @@
     if ((snapshot.model || defaults.model) === model) return snapshot;
     return snapshot.modelSnapshots?.[model] || { ...snapshot, model, source: modelInfo(model)?.source, rows: [], lookupRows: [], count: 0, complete: false, modelSnapshots: undefined };
   }
-  const defaults = { model: 'gpt-6-astra', minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 20, ttft: 35, cache: 15, effective: 25, cost: 5 } };
+  const defaults = { model: 'gpt-6-astra', minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function effectiveMultiplier(row) {
@@ -57,6 +57,7 @@
     if (!['ttftAvg', 'ttftP50', 'ttftP95'].includes(c.ttftMetric)) throw Error('未知 TTFT 口径');
     c.freshnessProfile = input.freshnessProfile === 'scheduled' ? 'scheduled' : 'local';
     c.blockedKeys = Array.isArray(input.blockedKeys) ? [...new Set(input.blockedKeys.filter(k => typeof k === 'string'))] : [];
+    c.priceOverrides = prices.normalize(input.priceOverrides ?? []);
     for (const k of Object.keys(defaults.weights)) if (!finite(c.weights[k]) || c.weights[k] < 0) throw Error('权重不能为负数');
     const total = Object.values(c.weights).reduce((a, b) => a + b, 0);
     if (total <= 0) throw Error('至少保留一项权重');
@@ -78,7 +79,8 @@
     const inScope = snapshot.rows.filter(r => (!target.source || r.source === target.source) && r.model === c.model && finite(r.multiplier) && r.multiplier >= c.minMultiplier);
     const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
     const blocked = inScope.filter(isBlocked);
-    const matches = inScope.filter(r => !isBlocked(r));
+    // Scope uses the public quote; a personal discount must not remove a channel.
+    const matches = inScope.filter(r => !isBlocked(r)).map(r => prices.apply(r, c.priceOverrides));
     const rows = matches.map(r => {
       const reasons = [];
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
@@ -136,7 +138,8 @@
       else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于最低倍率 ${result.config.minMultiplier}×`);
       if (target.source && r.source !== target.source) reasons.push(`不是 ${target.source} 渠道`);
       if (r.model !== target.id) reasons.push(`未列出 ${target.id}`);
-      return { ...r, effectiveMultiplier: effectiveMultiplier(r), overallRank: null, blockKey, reasons };
+      const priced = prices.apply(r, result.config.priceOverrides);
+      return { ...priced, effectiveMultiplier: effectiveMultiplier(priced), overallRank: null, blockKey, reasons };
     });
     return { rows, outside };
   }
@@ -145,7 +148,8 @@
     snapshot = selectSnapshot(snapshot, result.config.model);
     if (result.stale) throw Error(result.config.freshnessProfile === 'scheduled' ? '线上快照超过 20 分钟或不完整，请刷新或等待下次采集' : '行情超过 10 分钟、成功率超过 3 分钟或数据不完整，请先刷新');
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
-    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: modelInfo(result.config.model).source, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...result.config, method: 'eligibility_bands_v1', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
+    const { priceOverrides, ...scoring } = result.config;
+    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: modelInfo(result.config.model).source, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'eligibility_bands_v1', priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
   return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
 });
