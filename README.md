@@ -1,6 +1,6 @@
 # Route Radar · 多模型渠道雷达
 
-[在线使用](https://taffyofficial.github.io/gpt6-route-radar/) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [采集与部署状态](https://github.com/TaffyOfficial/gpt6-route-radar/actions/workflows/refresh-pages.yml)
+[在线使用](https://taffyofficial.github.io/gpt6-route-radar/) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [发布记录](https://github.com/TaffyOfficial/gpt6-route-radar/commits/gh-pages/)
 
 MIT 开源。公开行情数据来自 CodeGo，数据权利归原提供方。
 
@@ -44,22 +44,22 @@ Fable 5.1 使用市场实际收录的 `claude-fable-5-1`，不与其他别名混
 
 成功率来自 CodeGo 官方 `/api/group-status`。同时展示 所选模型最新成功率、渠道整体最新成功率，以及市场近 24h 成功率。界面注明采集时间、统计窗口和样本量；渠道窗口按该渠道子模型一致的窗口展示，不一致时标为未标注。
 
-GitHub Pages 版：独立服务器每 10 分钟检查快照，过旧时触发 GitHub Actions 采集并发布；GitHub 自带定时保留为补充。Actions 执行和发布仍可能延迟，网页始终显示真实采集时间。网页每 60 秒检查同站新快照，不跨域访问源站，不含 Key，也不运行 Python 服务。手动「检查新快照」不触发新的采集。
+GitHub Pages 版：维护者在服务器手动采集、构建静态文件并推送 `gh-pages`，原采集工作流及服务器定时器已暂停。网页每 60 秒检查同站新快照，不跨域访问源站，不含 Key，也不运行 Python 服务。手动「检查新快照」不触发新的采集。
 
-如果行情时间一直不变，先看页面的「最近检查」：暂无新数据表示读取成功，但后台没有发布新快照；读取失败表示页面请求失败。快照过期时会显示采集任务入口，仓库维护者可在 Actions → Refresh data and deploy Pages → Run workflow 手动采集。服务器触发使用独立 systemd timer，不依赖 GitHub 的 schedule 事件；运维方法见 [服务器触发器](deploy/README.md)。
+如果行情时间一直不变，先看页面的「最近检查」：暂无新数据表示读取成功，但服务器尚未发布新快照；读取失败表示页面请求失败。维护者在服务器执行 `systemctl start gpt6-route-radar-refresh.service`，完成后再检查快照；运维方法见 [服务器手动发布](deploy/README.md)。
 
 本地版：页面可见且自动刷新开启时每 60 秒刷新成功率，每 5 分钟刷新行情与模型列表。更新失败保留旧数据并提示，不将旧值冒充最新。页面关闭后停止本地刷新。
 
 ## GitHub Pages 部署
 
-1. 将源码放入公开仓库，默认分支为 `main`。
-2. 在 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
-3. 推送到 `main` 或手动运行 **Refresh data and deploy Pages**。
-4. 工作流先测试，再采集全部市场分页，生成 `dist/`，最后发布到项目路径 `/<仓库名>/`。
+1. 源码保存在 `main`，服务器使用本仓库的可写 SSH deploy key。
+2. 服务器运行 `deploy/publish_pages.py`，从当前 `main` 临时检出，采集全部模型并构建 `dist/`，再推送到 `gh-pages`。
+3. 在 **Settings → Pages → Build and deployment → Source** 选择 **Deploy from a branch**，分支选择 `gh-pages`，目录选择 `/ (root)`。
+4. 后续在服务器手动执行 `systemctl start gpt6-route-radar-refresh.service` 更新页面；推送源码到 `main` 不会自动采集发布。
 
-无需额外令牌或服务器。工作流采集失败会失败退出，保留上一版 Pages，不伪造更新时间。页面会提示过期。公开仓库长期无活动时 GitHub 可能暂停定时工作流，可在 Actions 中重新启用。
+原采集工作流已禁用，并移除了 push 和 schedule 触发；服务器 timer 也已禁用。GitHub 仍会执行自带的 Pages 分支发布任务，它只发布服务器推送的静态文件，不运行本项目采集器。
 
-`build_pages.py` 只发布明确列出的网页资源和公开行情快照；本机服务、测试、配置和日志不会被打包到 Pages。数据通过部署产物更新，不产生每 10 分钟一次的数据提交。
+采集或构建失败会在推送前退出，保留上一版 Pages。`build_pages.py` 只发布明确列出的网页资源和公开行情快照；本机服务、测试、配置和日志不会打包。每次手动发布产生一条 `gh-pages` 提交，不修改 `main` 或 `server-refresh`。
 
 ## 打开
 
@@ -96,12 +96,12 @@ GitHub Pages 版：独立服务器每 10 分钟检查快照，过旧时触发 Gi
 - 默认依据公开钱包倍率，个人套餐或折扣可手工录入个人倍率；不自动读取账户套餐。公开并发仅作参考，不能代替实时限流。
 - 「导出调度建议」生成最多 3 个真实 group_id 的优先级配置草案，未修改网站账户、绑定 Key 或发起付费测试。草案不是网站 PUT 接口的请求体。
 - 推荐会话固定渠道，失败后冷却 60 秒，最多 2 次尝试；开始输出后不自动切换。这些是导出的策略建议，此版本没有执行代理。
-- 本地行情超过 10 分钟或最新成功率超过 3 分钟时禁用导出；线上定时快照超过 20 分钟时禁用导出，并在导出中标记 `freshnessProfile: scheduled`。正式调度应接入自己的实时指标，并在切换前检查最新状态。
+- 本地行情超过 10 分钟或最新成功率超过 3 分钟时禁用导出；线上已发布快照超过 20 分钟时禁用导出，并在导出中标记 `freshnessProfile: scheduled`。正式调度应接入自己的实时指标，并在切换前检查最新状态。
 
 ## 文件与验证
 
 `collect.py` 负责公开数据采集和完整性检查；`rank.js` 是可复用评分器；`server.py` 提供仅绑定 127.0.0.1 的本地服务；`snapshot.json` 保存公开快照。
 
-运行 `node test-rank.js`、`node test-blacklist.js`、`node test-prices.js` 和 `python -m unittest test_collect.py test_pages.py test_trigger.py` 检查筛选、黑名单、个人报价及存储恢复、权重上限、过期保护、分页完整性、公开文件白名单及服务器触发器。运行 `python build_pages.py` 采集并构建静态站点。
+运行 `node test-rank.js`、`node test-blacklist.js`、`node test-prices.js` 和 `python -m unittest test_collect.py test_pages.py test_trigger.py test_publish.py` 检查筛选、黑名单、个人报价及存储恢复、权重上限、过期保护、分页完整性、公开文件白名单及服务器发布脚本。运行 `python build_pages.py` 采集并构建静态站点。
 
 采集器默认直连，避免继承失效的本机代理。如确需系统代理，可在启动前设置环境变量 `ROUTER_USE_PROXY=1`。

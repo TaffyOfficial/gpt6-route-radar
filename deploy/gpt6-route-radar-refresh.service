@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh Route Radar when its published snapshot is old
+Description=Manually collect and publish Route Radar to gh-pages
 Wants=network-online.target
 After=network-online.target
 
@@ -7,13 +7,13 @@ After=network-online.target
 Type=oneshot
 User=route-radar
 Group=route-radar
-ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/trigger_refresh.py
+ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/publish_pages.py --key /etc/gpt6-route-radar/deploy_key --known-hosts /etc/gpt6-route-radar/known_hosts
 StateDirectory=gpt6-route-radar
 UMask=0077
-TimeoutStartSec=180
+TimeoutStartSec=900
 Nice=10
-CPUQuota=10%
-MemoryMax=128M
+CPUQuota=50%
+MemoryMax=256M
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

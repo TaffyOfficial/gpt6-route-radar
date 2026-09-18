@@ -1,31 +1,39 @@
-# 独立服务器触发更新
+# 服务器手动发布
 
-服务器每小时第 03、13、23、33、43、53 分检查已发布快照。行情与成功率都不到 8 分钟时跳过；否则触发一次采集发布。近 15 分钟已有本工作流排队或运行时也跳过，避免重复。网页还是 GitHub Pages，数据采集和构建仍由 GitHub Actions 执行。
+采集和静态构建在服务器执行，产物推送到 `gh-pages`。Pages 配置为 **Deploy from a branch → gh-pages → / (root)**。原采集工作流已禁用并移除 push / schedule 触发，旧 systemd timer 保持 disabled / inactive；不再推送 `server-refresh`。
 
-这里使用仅限本仓库的 SSH deploy key。私钥只在服务器，不使用个人账号令牌。触发方式是更新专用 `server-refresh` 分支，工作流始终 checkout 当前 `main`；每个触发提交的父提交都是当前 `main`，专用分支只比主分支多一个空提交，主分支和数据不产生定时提交。更新使用 force-with-lease，避免覆盖并发更新。
+## 更新一次
 
-GitHub 原生 schedule 仍可触发更新，服务器根据数据新鲜度自动跳过。独立计时解决 schedule 不产生事件的问题，不能绕过 GitHub runner 或 Pages 本身的故障。服务器读取检查接口失败、SSH 失败会使服务失败，下一次定时重试；成功触发不等于成功发布，应结合 Actions 和页面采集时间确认。
-
-## 安装约定
-
-- 系统用户：`route-radar`，无交互登录。
-- 程序：`/opt/gpt6-route-radar/trigger_refresh.py`，root 管理、服务用户只读。
-- 凭证：`/etc/gpt6-route-radar/deploy_key`，root:route-radar，0640。
-- GitHub SSH 主机公钥：`/etc/gpt6-route-radar/known_hosts`，通过官方 HTTPS `https://api.github.com/meta` 核验，启用严格主机检查。
-- 状态与 Git 缓存：`/var/lib/gpt6-route-radar`，仅服务用户可写。
-- 将公钥注册为本仓库的可写 deploy key；Pages 环境部署分支策略允许 `main` 和 `server-refresh`。
-- 将本目录 `.service`、`.timer` 放入 `/etc/systemd/system/`，执行 `systemctl daemon-reload`，确认服务手动运行成功后启用 timer。
-
-## 查看与控制
+在服务器执行：
 
 ```sh
-systemctl list-timers gpt6-route-radar-refresh.timer
-systemctl status gpt6-route-radar-refresh.service
-journalctl -u gpt6-route-radar-refresh.service -n 30 --no-pager
 systemctl start gpt6-route-radar-refresh.service
-systemctl enable --now gpt6-route-radar-refresh.timer
-# 停止服务器触发，GitHub 原生定时仍保留
-systemctl disable --now gpt6-route-radar-refresh.timer
+journalctl -u gpt6-route-radar-refresh.service -n 40 --no-pager
 ```
 
-修改已发布项目中的脚本不会自动更新服务器文件。更新时由维护者复制本目录脚本和服务定义，重新加载 systemd；不让服务器自动执行未经维护者部署的新脚本。
+服务为 oneshot，成功后变为 inactive 属于正常状态。每次从当前 `main` 临时检出，使用 Python 3.10+ 和 Git 采集、构建并正常推送 `gh-pages`，不强制覆盖并发发布。采集或构建失败不推送；成功推送后应等待 Pages 发布，并检查线上快照时间。
+
+也可直接运行（不要与服务同时执行）：
+
+```sh
+sudo -u route-radar python3 /opt/gpt6-route-radar/publish_pages.py --key /etc/gpt6-route-radar/deploy_key --known-hosts /etc/gpt6-route-radar/known_hosts
+```
+
+网页的「检查新快照」仅读取已发布数据，不会执行此命令。没有固定更新周期；20 分钟的线上快照过期保护仍然生效。
+
+## 安装或更新脚本
+
+沿用现有的 `route-radar` 用户和仓库专用可写 deploy key。私钥为 `/etc/gpt6-route-radar/deploy_key`，root:route-radar、0640；经核验的 GitHub SSH 主机公钥保存在同目录的 `known_hosts`。
+
+将 `publish_pages.py` 复制到 `/opt/gpt6-route-radar/`，将 `gpt6-route-radar-refresh.service` 复制到 `/etc/systemd/system/`，然后执行：
+
+```sh
+systemctl disable --now gpt6-route-radar-refresh.timer
+systemctl stop gpt6-route-radar-refresh.service
+systemctl daemon-reload
+systemctl start gpt6-route-radar-refresh.service
+```
+
+不要启用旧 timer。仓库中的 `trigger_refresh.py` 和 timer 文件仅为旧方案留档。发布脚本每次拉取当前 `main`，但 `/opt` 中的入口脚本和 systemd 服务定义需要维护者显式更新。
+
+GitHub 仍会运行自带的 Pages 分支发布任务，它只发布已推送的静态文件。本项目的采集、测试工作流不会自动执行。

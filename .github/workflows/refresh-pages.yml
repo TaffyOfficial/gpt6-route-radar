@@ -1,13 +1,9 @@
 name: Refresh data and deploy Pages
 
 on:
-  push:
-    branches: [main, server-refresh]
+  # Paused in repository settings. Kept only as an explicitly enabled fallback.
+  # Normal publishing: server runs deploy/publish_pages.py and pushes gh-pages.
   workflow_dispatch:
-  schedule:
-    # Keep the ten-minute cadence away from the top of the hour.
-    # GitHub may delay or drop scheduled events; workflow_dispatch is the recovery path.
-    - cron: '7,17,27,37,47,57 * * * *'
 
 permissions:
   contents: read
@@ -19,7 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The server branch is only a wake-up signal. Always publish current main.
           ref: main
       - uses: actions/setup-python@v5
         with:

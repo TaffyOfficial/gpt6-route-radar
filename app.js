@@ -257,7 +257,7 @@
     $('scope-count').textContent = `${result.rows.length + result.blocked.length} 条符合当前筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
     if (refreshError || liveError) note([refreshError, liveError].filter(Boolean).join('；'), true);
     else if (activeSnapshot().complete !== true) note('当前快照尚未包含所选模型的完整数据，请刷新行情或等待后台采集。');
-    else if (result.stale) note(staticHosting ? '后台快照已过期，暂无有效调度建议。反复检查不会启动采集，请查看下方采集任务。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
+    else if (result.stale) note(staticHosting ? '快照已过期，暂无有效调度建议。请等待维护者从服务器推送更新。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
     else if (!online) note('当前为离线快照。运行 启动.ps1 可刷新行情。');
     else if (!pendingRefresh) note('');
     $('export').disabled = result.stale || !result.eligible.length;
@@ -441,9 +441,9 @@
     $('hosting-note').hidden = false;
     $('auto-refresh-label').textContent = '每 60 秒检查新快照';
     $('refresh').textContent = refreshLabel;
-    $('footer-mode').textContent = '开源排行榜 · GitHub Pages · 定时采集';
-    $('refresh-method').textContent = '服务器每 10 分钟检查快照，过旧时触发 GitHub Actions 采集并发布；GitHub 定时触发保留为补充。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
-    $('freshness-method').textContent = '调度建议为定时快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
+    $('footer-mode').textContent = '开源排行榜 · GitHub Pages · 手动发布';
+    $('refresh-method').textContent = '维护者在服务器手动采集并推送静态页面，未设置自动更新时间。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
+    $('freshness-method').textContent = '调度建议为已发布快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
   }
   render();
   if (blacklist.error) blacklistFeedback('');
