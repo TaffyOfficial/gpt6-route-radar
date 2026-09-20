@@ -21,6 +21,17 @@ class PagesTests(unittest.TestCase):
                 build_pages.build(destination, refresh=False)
             self.assertEqual({p.name for p in destination.iterdir()}, set(build_pages.PUBLIC_FILES) | {'runtime.js', '.nojekyll'})
             self.assertIn('"mode": "static"', (destination / 'runtime.js').read_text())
+            with patch.object(build_pages, 'ROOT', root):
+                build_pages.build(destination, refresh=False, snapshot_url='https://data.example.com/snapshot.json', hosting='Cloudflare Pages')
+            runtime = (destination / 'runtime.js').read_text()
+            self.assertIn('https://data.example.com/snapshot.json', runtime)
+            self.assertIn('Cloudflare Pages', runtime)
+            self.assertNotIn('private server source', runtime)
+
+    def test_reject_snapshot_urls_with_credentials_or_insecure_transport(self):
+        for url in ('http://example.com/snapshot.json', 'https://secret@example.com/snapshot.json', 'https://example.com/snapshot.json?token=secret'):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                build_pages.build('unused', refresh=False, snapshot_url=url)
 
     def test_build_fails_closed_without_valid_snapshot(self):
         with tempfile.TemporaryDirectory() as temporary:

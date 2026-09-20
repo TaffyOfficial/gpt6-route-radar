@@ -405,9 +405,11 @@
     $('refresh').textContent = '正在检查…'; $('refresh').disabled = true;
     $('snapshot-check').textContent = '正在检查已发布快照…';
     try {
-      const url = new URL('snapshot.json', location.href);
-      url.searchParams.set('t', String(Date.now()));
-      const response = await fetch(url.href, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+      const externalSnapshot = window.ROUTER_RUNTIME?.snapshotUrl;
+      const url = new URL(externalSnapshot || 'snapshot.json', location.href);
+      // Keep CDN URLs stable: per-visitor timestamps would bypass shared caching.
+      if (!externalSnapshot) url.searchParams.set('t', String(Date.now()));
+      const response = await fetch(url.href, { cache: externalSnapshot ? 'default' : 'no-store', credentials: 'omit', signal: AbortSignal.timeout(30000) });
       if (!response.ok) throw Error('快照读取失败（' + response.status + '）');
       const data = await response.json();
       if (data.schemaVersion !== 2 || data.complete !== true || !Array.isArray(data.rows) || !Number.isFinite(Date.parse(data.capturedAt))) throw Error('快照格式无效');
@@ -441,8 +443,10 @@
     $('hosting-note').hidden = false;
     $('auto-refresh-label').textContent = '每 60 秒检查新快照';
     $('refresh').textContent = refreshLabel;
-    $('footer-mode').textContent = '开源排行榜 · GitHub Pages · 手动发布';
-    $('refresh-method').textContent = '维护者在服务器手动采集并推送静态页面，未设置自动更新时间。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
+    $('footer-mode').textContent = `开源排行榜 · ${window.ROUTER_RUNTIME?.hosting || '静态站点'} · ${window.ROUTER_RUNTIME?.snapshotUrl ? '独立快照' : '手动发布'}`;
+    $('refresh-method').textContent = window.ROUTER_RUNTIME?.snapshotUrl
+      ? '行情快照独立更新，网页每 60 秒检查一次，可能受短时缓存影响。检查不会触发采集；失败时保留旧数据和真实采集时间。'
+      : '维护者在服务器手动采集并推送静态页面，未设置自动更新时间。网页每 60 秒检查同站 snapshot.json，手动检查不会触发后台采集。所有时间均保留实际采集时间，失败时继续展示旧数据。';
     $('freshness-method').textContent = '调度建议为已发布快照草案，不执行请求代理。线上快照超过 20 分钟禁用导出；切换渠道前应确认实时状态。本地版保持行情 10 分钟、成功率 3 分钟的过期门槛。';
   }
   render();
