@@ -32,6 +32,23 @@
   let snapshotCheckAt = 0, snapshotCheckState = '';
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   const prices = RouterPrices.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
+  const minimumMultiplierKey = 'gpt6-route-radar:min-multiplier:v1';
+  const minimumMultiplierHint = '保存在当前浏览器，刷新后保留。';
+  const filterNumber = id => { const value = Number($(id).value); return Number.isFinite(value) ? value : 0; };
+  function readMinimumMultiplier() {
+    try {
+      const saved = window.localStorage.getItem(minimumMultiplierKey);
+      $('min-multiplier').value = saved != null && Number.isFinite(Number(saved)) ? saved : 0;
+      $('min-multiplier-hint').textContent = minimumMultiplierHint;
+    } catch { $('min-multiplier-hint').textContent = '无法读取浏览器设置；当前使用页面显示的值。'; }
+  }
+  function saveMinimumMultiplier() {
+    try {
+      window.localStorage.setItem(minimumMultiplierKey, $('min-multiplier').value);
+      $('min-multiplier-hint').textContent = minimumMultiplierHint;
+    } catch { $('min-multiplier-hint').textContent = '无法保存设置；本页有效，刷新后需要重新设置。'; }
+  }
+  readMinimumMultiplier();
   let priceEditing = null, priceMessage = '';
   let undoKey = null;
   let searchQuery = new URLSearchParams(location.search).get('q') || '';
@@ -49,7 +66,7 @@
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
-    return { model: selectedModel, weights, ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
+    return { model: selectedModel, weights, minMultiplier: filterNumber('min-multiplier'), minSamples: filterNumber('min-samples'), minSuccess: filterNumber('min-success'), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
   }
   function priceRows() {
     const data = activeSnapshot();
@@ -224,7 +241,7 @@
     try { result = RouterRank.rank(snapshot, configuration()); }
     catch (e) { lastResult = null; $('export').disabled = true; note(e.message, true); return; }
     lastResult = result;
-    $('scope-multiplier').textContent = '不限倍率、样本数与成功率';
+    $('scope-multiplier').textContent = [[result.config.minMultiplier, '倍率', '×'], [result.config.minSamples, '样本', ''], [result.config.minSuccess, '成功率', '%']].map(([value, label, unit]) => value === 0 ? label + '不限' : label + ' ≥ ' + value + unit).join(' · ');
     const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
@@ -312,6 +329,16 @@
   }
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
   $('ttft-metric').addEventListener('change', render);
+  for (const id of ['min-success', 'min-samples', 'min-multiplier']) {
+    for (const eventName of ['input', 'change']) $(id).addEventListener(eventName, () => {
+      if (id === 'min-multiplier') saveMinimumMultiplier();
+      page = 1; priceMessage = ''; render();
+    });
+  }
+  window.addEventListener('storage', event => {
+    if (event.key !== minimumMultiplierKey && event.key !== null) return;
+    readMinimumMultiplier(); page = 1; priceMessage = ''; render();
+  });
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
   $('model-select').addEventListener('change', event => {
     selectedModel = event.target.value; selected = null; page = 1; tab = 'all';
@@ -320,7 +347,7 @@
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
-  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
+  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); for (const id of ['min-success', 'min-samples', 'min-multiplier']) $(id).value = 0; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {

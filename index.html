@@ -44,8 +44,11 @@
           <div class="weight-field"><label for="weight-cost"><span><i class="swatch cost"></i><span data-model-label>GPT6 Astra</span> 历史实扣</span><output id="out-cost">5%</output></label><input id="weight-cost" type="range" min="0" max="10" step="1" value="5"><p class="field-help">仅所选模型；最多 10%，避免其他用户的请求结构左右排名。</p></div>
           <div class="divider"></div>
           <button id="manage-prices" class="button manage-prices" type="button">个人价格 0</button>
-          <h2>统计口径</h2>
-          <p class="field-help">不限倍率、样本数与成功率。缺失数据以 — 显示。</p>
+          <h2>推荐门槛</h2>
+          <label class="input-label" for="min-success"><span data-model-label>GPT6 Astra</span> 最低成功率 <span>%</span></label><input id="min-success" type="number" step="any" value="0">
+          <label class="input-label" for="min-samples"><span data-model-label>GPT6 Astra</span> 最少请求样本</label><input id="min-samples" type="number" step="any" value="0">
+          <label class="input-label" for="min-multiplier">最低公开倍率</label><input id="min-multiplier" type="number" step="any" value="0" aria-describedby="min-multiplier-hint"><p id="min-multiplier-hint" class="field-help">保存在当前浏览器，刷新后保留。</p>
+          <p class="field-help">数值由你设置，无固定输入范围；填 0 或留空表示不限。缺失数据以 — 显示。</p>
           <label class="input-label" for="ttft-metric">TTFT 统计口径</label><select id="ttft-metric"><option value="ttftAvg">平均 TTFT</option><option value="ttftP50">P50 · 典型延迟</option><option value="ttftP95">P95 · 尾部延迟</option></select>
           <p class="field-help">未过门槛降至 0–49 分；通过后为 50–100 分。平台观测标记仅作提示。TTFT 为渠道全模型近 24h。</p>
         </aside>
@@ -68,7 +71,7 @@
           </section>
           <section id="detail" class="detail" hidden aria-live="polite"></section>
           <details class="method"><summary>排名怎么计算？数据有哪些局限？</summary><div class="method-body">
-            <p><b>推荐门槛计入综合分。</b>当前来源范围内、支持所选模型的渠道都显示并评分，不设倍率、样本数或成功率门槛，不限制总条数。通过验证、无当前故障、并发未满且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。平台“观测中”标记只作提示，不影响评分或推荐。</p>
+            <p><b>推荐门槛计入综合分。</b>当前来源范围内、支持所选模型并符合你设置的最低倍率的渠道显示并评分，不限制总条数。倍率、样本数和成功率门槛均可自行设置，填 0 或留空表示不限。通过验证、无当前故障、并发未满、满足所设样本数和成功率门槛且 TTFT、缓存统计有效，才进入 50–100 分档及调度建议；未通过的渠道保留在观察区，降至 0–49 分并列明原因。平台“观测中”标记只作提示，不影响评分或推荐。</p>
             <p><b>黑名单仅对当前浏览器生效。</b>拉黑后渠道从榜单、推荐和新导出的调度建议中移除；「黑名单」中可恢复。刷新行情、改名和价格变化不会解除拉黑。清除网站存储会清除名单，不跨设备同步，也不修改 CodeGo 账户。</p>
             <p><b>基础分默认：缓存折算倍率 60%、TTFT 35%、实扣 5%。</b>原始倍率和缓存的独立权重默认为 0，避免重复计算；手工开启时表示额外偏好。价格分 = 100 × 0.20 / 倍率；TTFT 分 = 100 / (1 + 毫秒 / 10000)；缓存分 = 接口百分比；缓存折算倍率 = 倍率 ÷（缓存命中百分数 / 100），该项分数 = 100 × 0.20 / 缓存折算倍率，最高 100 分。零命中显示 ∞，缺失显示 —，两者该项均记 0 分；实扣分 = 入选渠道最低实扣 / 本渠道实扣 × 100。缺少实扣记 0 分。各项按权重相加得到基础分；通过门槛时综合分 = 50 + 基础分 × 0.5，未通过时 = 基础分 × 0.49。分数不是成功概率。</p>
             <p><b>个人价格仅保存在当前浏览器。</b>按渠道编号记住倍率，适用于该渠道所有模型；行情更新不覆盖。筛选仍按公开倍率，个人倍率用于价格、折算倍率、排名和调度导出。恢复评分默认值保留个人价格，可单独恢复公开价。<span data-model-label>GPT6 Astra</span> 历史实扣仍是平台公开的所选模型每百万实际 token 平均扣费，不随个人报价调整，也不代表实际充值成本。</p>

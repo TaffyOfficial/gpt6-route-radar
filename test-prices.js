@@ -54,11 +54,11 @@ test('personal price changes rank, adjusted multiplier and export without mutati
   assert.ok(outside.reasons.includes('已被你拉黑'));
   assert.equal(R.rank(snapshot([{...row,modelStatus:'failed'}]),{priceOverrides:[{key:'channel:80',multiplier:.01}]},now).eligible.length,0);
 });
-test('removed price floor preserves public quotes and personal discounts', () => {
+test('user price floor uses public quotes while personal discounts affect scoring', () => {
   const s=snapshot([row,{...row,id:'b',channelId:'153',multiplier:.3}]);
   const config={minMultiplier:.25,priceOverrides:[{key:'channel:153',multiplier:.1},{key:'channel:80',multiplier:.5}]};
-  assert.deepEqual(R.rank(s,config,now).rows.map(r=>r.channelId),['153','80']);
-  const found=R.search(s,R.rank(s,config,now),'80').rows[0];
+  assert.deepEqual(R.rank(s,config,now).rows.map(r=>r.channelId),['153']);
+  const found=R.search(s,R.rank(s,config,now),'80').outside[0];
   assert.equal(found.publicMultiplier,.2); assert.equal(found.multiplier,.5);
 });
 test('same channel override is used across models and survives live data refresh', () => {

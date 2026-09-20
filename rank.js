@@ -51,8 +51,11 @@
   function config(input = {}) {
     const c = { ...defaults, ...input, weights: { ...defaults.weights, ...input.weights } };
     if (!modelInfo(c.model)) throw Error('未知模型');
-    // Removed filters stay disabled even when supplied by an older client.
-    c.minMultiplier = c.minSamples = c.minSuccess = 0;
+    // User-defined thresholds have no imposed range or rounding; blank means off.
+    for (const key of ['minMultiplier', 'minSamples', 'minSuccess']) {
+      const value = Number(c[key]);
+      c[key] = Number.isFinite(value) ? value : 0;
+    }
     if (!['ttftAvg', 'ttftP50', 'ttftP95'].includes(c.ttftMetric)) throw Error('未知 TTFT 口径');
     c.freshnessProfile = input.freshnessProfile === 'scheduled' ? 'scheduled' : 'local';
     c.blockedKeys = Array.isArray(input.blockedKeys) ? [...new Set(input.blockedKeys.filter(k => typeof k === 'string'))] : [];
@@ -77,7 +80,8 @@
     const blockedKeys = new Set(c.blockedKeys);
     // Older snapshots stored low quotes separately; include them without duplicating groups.
     const candidates = new Map([...(snapshot.lookupRows || []), ...snapshot.rows].map(r => [r.id, r]));
-    const inScope = [...candidates.values()].filter(r => (!target.source || r.source === target.source) && r.model === c.model);
+    const inScope = [...candidates.values()].filter(r => (!target.source || r.source === target.source) && r.model === c.model &&
+      (c.minMultiplier === 0 || (finite(r.multiplier) && r.multiplier >= c.minMultiplier)));
     const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
     const blocked = inScope.filter(isBlocked);
     // Personal prices affect scoring, while model scope and blacklist stay unchanged.
@@ -88,6 +92,8 @@
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
       // The platform observation flag is informational, not an availability gate.
       if (r.modelStatus === 'failed') reasons.push('当前模型故障');
+      if (c.minSamples > 0 && (!finite(r.modelRequests) || r.modelRequests < c.minSamples)) reasons.push('低于你设置的样本数');
+      if (c.minSuccess > 0 && (!finite(r.success) || r.success < c.minSuccess)) reasons.push('低于你设置的成功率');
       if (!finite(r[c.ttftMetric]) || r[c.ttftMetric] <= 0 || !finite(r.ttftSamples) || r.ttftSamples <= 0) reasons.push('缺少有效 TTFT');
       if (!finite(r.cache) || r.cache < 0 || r.cache > 100) reasons.push('缺少有效缓存统计');
       if (finite(r.maxConcurrency) && r.maxConcurrency > 0 && finite(r.currentConcurrency) && r.currentConcurrency >= r.maxConcurrency) reasons.push('并发已满');
@@ -135,6 +141,7 @@
       const blockKey = blocked.has('channel:' + r.channelId) ? 'channel:' + r.channelId : blocked.has('group:' + r.id) ? 'group:' + r.id : null;
       if (blockKey) reasons.push('已被你拉黑');
       if (!finite(r.multiplier)) reasons.push('缺少倍率');
+      else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于你设置的 ${result.config.minMultiplier}×`);
       if (target.source && r.source !== target.source) reasons.push(`不是 ${target.source} 渠道`);
       if (r.model !== target.id) reasons.push(`未列出 ${target.id}`);
       const priced = prices.apply(r, result.config.priceOverrides);

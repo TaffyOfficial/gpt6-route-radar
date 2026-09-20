@@ -83,12 +83,12 @@ test('observation bands stay fixed when other channels or recommendation filters
   const raised = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), { minSuccess: 99 }, now);
   assert.equal(together.rows.find(row => row.id === 'watch').score, alone.score);
   assert.equal(raised.rows.find(row => row.id === 'watch').score, alone.score);
-  assert.deepEqual(raised.rows, together.rows);
+  assert.ok(raised.rows.find(row => row.id === 'slow').score < 50);
 });
-test('removed thresholds and zero or missing samples/success never block or downgrade', () => {
+test('blank or zero thresholds allow zero or missing samples/success', () => {
   for (const change of [{success:0, modelRequests:0}, {success:null, modelRequests:null}, {success:94, modelRequests:1}]) {
     const s = snap([make(change)]);
-    const result = rank(s, {minMultiplier:99, minSamples:99999, minSuccess:100}, now);
+    const result = rank(s, {minMultiplier:'', minSamples:0, minSuccess:''}, now);
     assert.equal(result.rows.length,1); assert.equal(result.eligible.length,1);
     assert.ok(result.rows[0].score >= 50);
     assert.equal(plan(s,{},now).channels.length,1);
@@ -97,6 +97,16 @@ test('removed thresholds and zero or missing samples/success never block or down
   assert.equal(result.rows.length,2);
   assert.ok(result.rows.every(r=>Number.isFinite(r.score)));
   assert.equal(result.rows.find(r=>r.id==='a').components.price,0);
+});
+test('custom thresholds work below former limits and are never clamped', () => {
+  const s = snap([make({id:'cheap',multiplier:.05,modelRequests:0,success:0}),make({id:'other',multiplier:.1,modelRequests:2,success:80})]);
+  assert.equal(rank(s,{minMultiplier:.01,minSamples:0,minSuccess:0},now).eligible.length,2);
+  assert.deepEqual(rank(s,{minMultiplier:.08},now).rows.map(r=>r.id),['other']);
+  assert.deepEqual(rank(s,{minSamples:.5},now).eligible.map(r=>r.id),['other']);
+  assert.deepEqual(rank(s,{minSuccess:50},now).eligible.map(r=>r.id),['other']);
+  const beyond=rank(s,{minMultiplier:-1,minSamples:-2.5,minSuccess:101},now);
+  assert.equal(beyond.config.minMultiplier,-1); assert.equal(beyond.config.minSamples,-2.5); assert.equal(beyond.config.minSuccess,101);
+  assert.equal(beyond.eligible.length,0);
 });
 test('pagination visits every channel exactly once with continuous offsets', () => {
   const rows = Array.from({length:123}, (_,i) => ({id:i}));
@@ -153,7 +163,7 @@ test('old lookup-only low quotes join rankings and still respect blacklists', ()
   const blocked=rank(s,{blockedKeys:['channel:200']},now);
   assert.equal(search(s,blocked,'200').outside[0].blockKey,'channel:200');
   assert.equal(search(s,blocked,'').outside.length,0);
-  assert.deepEqual(rank(s,{minMultiplier:.3},now).rows,r.rows);
+  assert.equal(rank(s,{minMultiplier:.3},now).rows.length,0);
   s.lookupRows.push({...s.rows[0],multiplier:.01});
   const deduplicated=rank(s,{},now);
   assert.equal(deduplicated.rows.length,2);
