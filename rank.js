@@ -16,11 +16,12 @@
     if ((snapshot.model || defaults.model) === model) return snapshot;
     return snapshot.modelSnapshots?.[model] || { ...snapshot, model, source: modelInfo(model)?.source, rows: [], lookupRows: [], count: 0, complete: false, modelSnapshots: undefined };
   }
-  const defaults = { model: 'gpt-6-astra', minMultiplier: .20, minSamples: 20, minSuccess: 95, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
+  const defaults = { model: 'gpt-6-astra', minMultiplier: 0, minSamples: 0, minSuccess: 0, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
+  const priceReferenceMultiplier = .20;
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function effectiveMultiplier(row) {
-    return finite(row.multiplier) && row.multiplier > 0 && finite(row.cache) && row.cache > 0 && row.cache <= 100
+    return finite(row.multiplier) && row.multiplier >= 0 && finite(row.cache) && row.cache > 0 && row.cache <= 100
       ? row.multiplier / (row.cache / 100) : null;
   }
   function applyStatus(snapshot, response) {
@@ -50,10 +51,8 @@
   function config(input = {}) {
     const c = { ...defaults, ...input, weights: { ...defaults.weights, ...input.weights } };
     if (!modelInfo(c.model)) throw Error('未知模型');
-    for (const k of ['minMultiplier', 'minSamples', 'minSuccess']) if (!finite(c[k])) throw Error('筛选条件需要有效数字');
-    c.minMultiplier = Math.max(defaults.minMultiplier, c.minMultiplier);
-    c.minSamples = Math.max(1, Math.floor(c.minSamples));
-    c.minSuccess = clamp(c.minSuccess, 0, 100);
+    // Removed filters stay disabled even when supplied by an older client.
+    c.minMultiplier = c.minSamples = c.minSuccess = 0;
     if (!['ttftAvg', 'ttftP50', 'ttftP95'].includes(c.ttftMetric)) throw Error('未知 TTFT 口径');
     c.freshnessProfile = input.freshnessProfile === 'scheduled' ? 'scheduled' : 'local';
     c.blockedKeys = Array.isArray(input.blockedKeys) ? [...new Set(input.blockedKeys.filter(k => typeof k === 'string'))] : [];
@@ -76,18 +75,19 @@
     const liveStale = !Number.isFinite(liveTimestamp) || now - liveTimestamp > liveMaxAge || liveTimestamp - now > 60000;
     const stale = !Number.isFinite(timestamp) || now - timestamp > marketMaxAge || timestamp - now > 60000 || snapshot.complete !== true || liveStale;
     const blockedKeys = new Set(c.blockedKeys);
-    const inScope = snapshot.rows.filter(r => (!target.source || r.source === target.source) && r.model === c.model && finite(r.multiplier) && r.multiplier >= c.minMultiplier);
+    // Older snapshots stored low quotes separately; include them without duplicating groups.
+    const candidates = new Map([...(snapshot.lookupRows || []), ...snapshot.rows].map(r => [r.id, r]));
+    const inScope = [...candidates.values()].filter(r => (!target.source || r.source === target.source) && r.model === c.model);
     const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
     const blocked = inScope.filter(isBlocked);
-    // Scope uses the public quote; a personal discount must not remove a channel.
+    // Personal prices affect scoring, while model scope and blacklist stay unchanged.
     const matches = inScope.filter(r => !isBlocked(r)).map(r => prices.apply(r, c.priceOverrides));
     const rows = matches.map(r => {
       const reasons = [];
+      if (!finite(r.multiplier) || r.multiplier < 0) reasons.push('缺少有效报价');
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
       // The platform observation flag is informational, not an availability gate.
       if (r.modelStatus === 'failed') reasons.push('当前模型故障');
-      if (!finite(r.modelRequests) || r.modelRequests < c.minSamples) reasons.push('当前模型样本不足');
-      if (!finite(r.success) || r.success < c.minSuccess) reasons.push('当前模型成功率未达标');
       if (!finite(r[c.ttftMetric]) || r[c.ttftMetric] <= 0 || !finite(r.ttftSamples) || r.ttftSamples <= 0) reasons.push('缺少有效 TTFT');
       if (!finite(r.cache) || r.cache < 0 || r.cache > 100) reasons.push('缺少有效缓存统计');
       if (finite(r.maxConcurrency) && r.maxConcurrency > 0 && finite(r.currentConcurrency) && r.currentConcurrency >= r.maxConcurrency) reasons.push('并发已满');
@@ -98,8 +98,8 @@
     const costMin = observed.length ? Math.min(...observed) : null;
     for (const r of rows) {
       r.components = {
-        price: 100 * clamp(defaults.minMultiplier / r.multiplier, 0, 1),
-        effective: r.effectiveMultiplier != null ? 100 * clamp(defaults.minMultiplier / r.effectiveMultiplier, 0, 1) : 0,
+        price: finite(r.multiplier) && r.multiplier >= 0 ? 100 * clamp(priceReferenceMultiplier / r.multiplier, 0, 1) : 0,
+        effective: r.effectiveMultiplier != null ? 100 * clamp(priceReferenceMultiplier / r.effectiveMultiplier, 0, 1) : 0,
         ttft: finite(r.latency) && r.latency > 0 ? 100 / (1 + r.latency / 10000) : 0,
         cache: finite(r.cache) ? clamp(r.cache, 0, 100) : 0,
         cost: costMin && finite(r.historicalCost) && r.historicalCost > 0 ? 100 * clamp(costMin / r.historicalCost, 0, 1) : 0
@@ -135,7 +135,6 @@
       const blockKey = blocked.has('channel:' + r.channelId) ? 'channel:' + r.channelId : blocked.has('group:' + r.id) ? 'group:' + r.id : null;
       if (blockKey) reasons.push('已被你拉黑');
       if (!finite(r.multiplier)) reasons.push('缺少倍率');
-      else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于最低倍率 ${result.config.minMultiplier}×`);
       if (target.source && r.source !== target.source) reasons.push(`不是 ${target.source} 渠道`);
       if (r.model !== target.id) reasons.push(`未列出 ${target.id}`);
       const priced = prices.apply(r, result.config.priceOverrides);

@@ -27,6 +27,18 @@ class PagesTests(unittest.TestCase):
             self.assertIn('https://data.example.com/snapshot.json', runtime)
             self.assertIn('Cloudflare Pages', runtime)
             self.assertNotIn('private server source', runtime)
+            (root / 'deploy').mkdir()
+            (root / 'deploy/pages-worker.mjs').write_text('export default {}')
+            with patch.object(build_pages, 'ROOT', root):
+                build_pages.build(destination, refresh=False, pages=True)
+            self.assertEqual(json.loads((destination / '_routes.json').read_text())['include'], ['/api/snapshot'])
+            self.assertIn('"snapshotUrl": "/api/snapshot"', (destination / 'runtime.js').read_text())
+            self.assertNotIn('https://data.example.com', (destination / 'runtime.js').read_text())
+            self.assertFalse((destination / '.env').exists())
+            with patch.object(build_pages, 'ROOT', root):
+                build_pages.build(destination, refresh=False)
+            self.assertFalse((destination / '_worker.js').exists())
+            self.assertFalse((destination / '_routes.json').exists())
 
     def test_reject_snapshot_urls_with_credentials_or_insecure_transport(self):
         for url in ('http://example.com/snapshot.json', 'https://secret@example.com/snapshot.json', 'https://example.com/snapshot.json?token=secret'):

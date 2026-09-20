@@ -72,14 +72,17 @@ class CollectorTests(unittest.TestCase):
         self.assertEqual(row['modelStats'][1]['success'], 96)
         self.assertEqual(snapshot['schemaVersion'], 2)
 
-    def test_below_floor_channels_are_searchable_but_not_ranked(self):
+    def test_low_zero_and_missing_quotes_are_all_retained(self):
         group = {'id': 'a', 'channel_id': '153', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .2, 'system_display_name': '153-Codex Pro-0.2x'}
         low = {**group, 'id': 'low', 'channel_id': '999', 'multiplier': .199999}
-        out = collect.normalize([group, low], {'data': []}, {}, {'data': {'quota_per_unit': 500000}})
-        self.assertEqual(out['minMultiplier'], .2)
-        self.assertEqual(out['count'], 1)
+        out = collect.normalize([group, low, {**group, 'id': 'zero', 'multiplier': 0}, {**group, 'id': 'missing', 'multiplier': None}], {'data': []}, {}, {'data': {'quota_per_unit': 500000}})
+        self.assertEqual(out['minMultiplier'], 0)
+        self.assertEqual(out['count'], 4)
         self.assertEqual(out['rows'][0]['channelId'], '153')
-        self.assertEqual(out['lookupRows'][0]['channelId'], '999')
+        self.assertEqual(out['rows'][1]['channelId'], '999')
+        self.assertEqual(out['rows'][2]['multiplier'], 0)
+        self.assertIsNone(out['rows'][3]['multiplier'])
+        self.assertEqual(out['lookupRows'], [])
 
     def test_historical_cost_uses_only_gpt6_and_never_group_or_other_models(self):
         group = {'id': 'a', 'models': ['gpt-6-astra'], 'source_label': 'Codex Pro', 'multiplier': .22, 'system_display_name': 'test', 'avg_consumer_amount': 9999999, 'avg_consumer_amount_by_model': {'gpt-5.6-sol': 8888888, 'gpt-6-astra': 175000}}

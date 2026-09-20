@@ -6,16 +6,16 @@ const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 
 const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete: true });
 let tests = 0;
 function test(name, fn) { fn(); tests++; console.log('PASS', name); }
-test('exact source/model and inclusive 0.20 floor', () => {
+test('exact source/model with low public quotes included', () => {
   const r = rank(snap([make(), make({ id: 'b', multiplier: .199999 }), make({ id: 'c', source: 'Codex Plus' }), make({ id: 'd', model: 'gpt-5.6-sol' })]), {minMultiplier: .1}, now);
-  assert.deepEqual(r.rows.map(r => r.id), ['a']);
+  assert.deepEqual(r.rows.map(r => r.id), ['b', 'a']);
 });
 test('zero/missing latency and missing cache never rank as free/fast', () => {
   for (const change of [{ ttftAvg: 0 }, { ttftAvg: null }, { ttftSamples: 0 }, { cache: null }]) assert.equal(rank(snap([make(change)]), {}, now).eligible.length, 0);
 });
 test('zero measured cache is valid, not missing', () => assert.equal(rank(snap([make({ cache: 0 })]), {}, now).eligible.length, 1));
-test('current model failure, low sample and full capacity remain gated while platform observes', () => {
-  for (const change of [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }]) assert.equal(rank(snap([make({ observing: true, ...change })]), {}, now).eligible.length, 0);
+test('current model failure and full capacity remain gated while platform observes', () => {
+  for (const change of [{ modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }]) assert.equal(rank(snap([make({ observing: true, ...change })]), {}, now).eligible.length, 0);
 });
 test('platform observation alone changes neither eligibility, score, ranking nor route selection', () => {
   const s = snap([make({ id: '550', channelId: '550', multiplier: .2888, cache: 91.62, ttftAvg: 22272, success: 95.652, modelRequests: 23 }), make({ id: 'other', multiplier: .7, ttftAvg: 30000 })]);
@@ -39,7 +39,7 @@ test('lower price and lower latency improve their scores', () => {
 test('unknown historical spend earns zero, not cheapest score', () => assert.equal(rank(snap([make({ historicalCost: null })]), {}, now).eligible[0].components.cost, 0));
 test('failed channel historical spend does not alter healthy ranking', () => {
   const a = rank(snap([make()]), {}, now).eligible[0].score;
-  const b = rank(snap([make(), make({ id: 'b', success: 0, historicalCost: .0001 })]), {}, now).eligible[0].score;
+  const b = rank(snap([make(), make({ id: 'b', modelStatus: 'failed', historicalCost: .0001 })]), {}, now).eligible[0].score;
   assert.equal(a, b);
 });
 test('historical spend capped at normalized 10%', () => assert.throws(() => rank(snap([make()]), { weights: { price: 1, ttft: 1, cache: 1, cost: 10 } }, now), /10%/));
@@ -47,18 +47,18 @@ test('invalid zero total is rejected', () => assert.throws(() => rank(snap([make
 test('stale, future, invalid and partial snapshots cannot export routes', () => {
   for (const changes of [{ capturedAt: new Date(now - 600001).toISOString() }, { capturedAt: 'invalid' }, { capturedAt: new Date(now + 120000).toISOString() }, { complete: false }]) assert.throws(() => plan({ ...snap([make()]), ...changes }, {}, now), /刷新/);
 });
-test('empty selection fails closed', () => assert.throws(() => plan(snap([make({ success: 0 })]), {}, now), /没有/));
+test('empty selection fails closed', () => assert.throws(() => plan(snap([make({ modelStatus: 'failed' })]), {}, now), /没有/));
 test('route plan has only eligible channels with real IDs and expiry', () => {
-  const p = plan(snap([make(), make({ id: 'b', modelRequests: 0 })]), {}, now);
+  const p = plan(snap([make(), make({ id: 'b', modelStatus: 'failed' })]), {}, now);
   assert.equal(p.channels.length, 1); assert.equal(p.channels[0].group_id, 'a'); assert.equal(Date.parse(p.validUntil), now + 180000);
 });
 test('all-channel ranking retains low success and low sample channels with scores', () => {
   const r = rank(snap([make(), make({ id: 'b', success: 2 }), make({ id: 'c', modelRequests: 0 })]), {}, now);
-  assert.equal(r.rows.length, 3); assert.equal(r.eligible.length, 1);
+  assert.equal(r.rows.length, 3); assert.equal(r.eligible.length, 3);
   assert.ok(r.rows.every(row => Number.isFinite(row.score)));
 });
 test('even the best observation score stays below the weakest eligible channel', () => {
-  const changes = [{ success: 94.9 }, { modelRequests: 19 }, { modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
+  const changes = [{ modelStatus: 'failed' }, { verified: false }, { lifecycle: 'disabled' }, { maxConcurrency: 3, currentConcurrency: 3 }, { ttftAvg: 0 }, { cache: null }];
   const s = snap([make({ id: 'eligible', cache: 0 }), ...changes.map((change, i) => make({ id: 'excluded-' + i, cache: 100, ...change }))]);
   const r = rank(s, { weights: { price: 0, ttft: 0, cache: 100, effective: 0, cost: 0 } }, now);
   assert.equal(r.rows[0].id, 'eligible'); assert.equal(r.rows[0].score, 50);
@@ -67,7 +67,7 @@ test('even the best observation score stays below the weakest eligible channel',
   assert.equal(r.excluded.at(-1).score, 0);
 });
 test('fixed bands retain weighted base score, ordering and exact score-bar contributions', () => {
-  const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', success: 90 })]), {}, now);
+  const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', modelStatus: 'failed' })]), {}, now);
   assert.deepEqual(r.rows.map(row => row.id), ['a', 'b', 'c']);
   assert.equal(r.rows[0].baseScore, 73.5); assert.equal(r.rows[0].score, 86.75);
   assert.equal(r.rows[2].score, r.rows[2].baseScore * .49);
@@ -77,20 +77,26 @@ test('fixed bands retain weighted base score, ordering and exact score-bar contr
   assert.equal(p.channels[0].baseScore, 73.5); assert.equal(p.channels[0].score, 86.75);
 });
 test('observation bands stay fixed when other channels or recommendation filters change', () => {
-  const observation = make({ id: 'watch', modelRequests: 10, historicalCost: null });
+  const observation = make({ id: 'watch', modelStatus: 'failed', historicalCost: null });
   const alone = rank(snap([observation]), {}, now).rows[0];
   const together = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), {}, now);
   const raised = rank(snap([observation, make({ id: 'slow', multiplier: 100, ttftAvg: 1e9, cache: 0, success: 96 })]), { minSuccess: 99 }, now);
   assert.equal(together.rows.find(row => row.id === 'watch').score, alone.score);
   assert.equal(raised.rows.find(row => row.id === 'watch').score, alone.score);
-  assert.ok(raised.rows.every(row => row.score <= 49));
+  assert.deepEqual(raised.rows, together.rows);
 });
-test('current success and user thresholds move scores between the same fixed bands', () => {
-  const s = snap([make({ success: 94 })]);
-  assert.ok(rank(s, {}, now).rows[0].score <= 49);
-  assert.ok(rank(s, { minSuccess: 94 }, now).rows[0].score >= 50);
-  const updated = applyStatus(s, { capturedAt: new Date(now + 1000).toISOString(), data: [{ group_id: 'a', models: [{ model: 'gpt-6-astra', success_rate: 99, request_count: 100, cache_hit_rate: 85, status: 'healthy' }] }] });
-  assert.ok(rank(updated, {}, now + 1000).rows[0].score >= 50);
+test('removed thresholds and zero or missing samples/success never block or downgrade', () => {
+  for (const change of [{success:0, modelRequests:0}, {success:null, modelRequests:null}, {success:94, modelRequests:1}]) {
+    const s = snap([make(change)]);
+    const result = rank(s, {minMultiplier:99, minSamples:99999, minSuccess:100}, now);
+    assert.equal(result.rows.length,1); assert.equal(result.eligible.length,1);
+    assert.ok(result.rows[0].score >= 50);
+    assert.equal(plan(s,{},now).channels.length,1);
+  }
+  const result=rank(snap([make({multiplier:null}),make({id:'zero',multiplier:0})]), {}, now);
+  assert.equal(result.rows.length,2);
+  assert.ok(result.rows.every(r=>Number.isFinite(r.score)));
+  assert.equal(result.rows.find(r=>r.id==='a').components.price,0);
 });
 test('pagination visits every channel exactly once with continuous offsets', () => {
   const rows = Array.from({length:123}, (_,i) => ({id:i}));
@@ -139,17 +145,19 @@ test('search preserves full ranking and matches numeric IDs exactly across pages
   assert.equal(search(s,r,'absent').rows.length,0);
   assert.equal(plan(s,{},now).channels.length,3);
 });
-test('search explains floor and blacklist exclusions without restoring or scoring them', () => {
+test('old lookup-only low quotes join rankings and still respect blacklists', () => {
   const s = {...snap([make({channelId:'200'})]),lookupRows:[make({id:'low',channelId:'999',multiplier:.19,historicalCost:.00001})]};
   const r = rank(s,{},now), found=search(s,r,'999');
-  assert.equal(found.rows.length,0);assert.equal(found.outside.length,1);assert.equal(found.outside[0].overallRank,null);
-  assert.match(found.outside[0].reasons[0],/0.19×.*0.2×/);
-  assert.equal(r.rows[0].components.cost,100);assert.equal(plan(s,{},now).channels[0].channel_id,'200');
+  assert.equal(found.rows.length,1); assert.equal(found.outside.length,0);
+  assert.ok(found.rows[0].overallRank); assert.equal(plan(s,{},now).channels[0].channel_id,'999');
   const blocked=rank(s,{blockedKeys:['channel:200']},now);
   assert.equal(search(s,blocked,'200').outside[0].blockKey,'channel:200');
   assert.equal(search(s,blocked,'').outside.length,0);
-  const raised=rank(s,{minMultiplier:.3},now);
-  assert.match(search(s,raised,'200').outside[0].reasons[0],/0.3×/);
+  assert.deepEqual(rank(s,{minMultiplier:.3},now).rows,r.rows);
+  s.lookupRows.push({...s.rows[0],multiplier:.01});
+  const deduplicated=rank(s,{},now);
+  assert.equal(deduplicated.rows.length,2);
+  assert.equal(deduplicated.rows.find(row=>row.id==='a').publicMultiplier,.2);
 });
 test('lookup-only channels receive current model status too', () => {
   const s={...snap([]),lookupRows:[make({id:'low',channelId:'999',multiplier:.19})]};

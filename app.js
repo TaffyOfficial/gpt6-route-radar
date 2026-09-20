@@ -3,6 +3,7 @@
   const $ = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const format = (v, digits = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : '—';
+  const multiplierLabel = value => typeof value === 'number' && Number.isFinite(value) ? String(value) + '×' : '—';
   const keys = ['price', 'ttft', 'cache', 'effective', 'cost'];
   const labels = { price: '价格', ttft: 'TTFT', cache: '缓存', effective: '缓存折算倍率', cost: '模型实扣' };
   const presetWeights = { balanced: [0, 35, 0, 60, 5], fast: [0, 60, 0, 35, 5], cheap: [0, 15, 0, 80, 5] };
@@ -31,24 +32,6 @@
   let snapshotCheckAt = 0, snapshotCheckState = '';
   const blacklist = RouterBlacklist.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
   const prices = RouterPrices.createStore({ getItem: k => window.localStorage.getItem(k), setItem: (k, v) => window.localStorage.setItem(k, v) });
-  const minimumMultiplierKey = 'gpt6-route-radar:min-multiplier:v1';
-  const minimumMultiplierHint = '保存在当前浏览器，刷新后保留。';
-  function readMinimumMultiplier() {
-    const input = $('min-multiplier');
-    try {
-      const saved = window.localStorage.getItem(minimumMultiplierKey);
-      input.value = saved ?? RouterRank.defaults.minMultiplier;
-      if (!input.value || !input.checkValidity()) input.value = RouterRank.defaults.minMultiplier;
-      $('min-multiplier-hint').textContent = minimumMultiplierHint;
-    } catch { $('min-multiplier-hint').textContent = '无法读取浏览器设置；当前使用页面显示的倍率门槛。'; }
-  }
-  function saveMinimumMultiplier() {
-    try {
-      window.localStorage.setItem(minimumMultiplierKey, $('min-multiplier').value);
-      $('min-multiplier-hint').textContent = minimumMultiplierHint;
-    } catch { $('min-multiplier-hint').textContent = '无法保存倍率门槛；本页有效，刷新后需要重新设置。'; }
-  }
-  readMinimumMultiplier();
   let priceEditing = null, priceMessage = '';
   let undoKey = null;
   let searchQuery = new URLSearchParams(location.search).get('q') || '';
@@ -66,8 +49,7 @@
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
-    for (const id of ['min-success', 'min-samples', 'min-multiplier']) if (!$(id).checkValidity() || $(id).value === '') throw Error('请检查入选门槛：最低倍率 0.20，样本数至少 1，成功率 0–100%');
-    return { model: selectedModel, weights, minMultiplier: Number($('min-multiplier').value), minSamples: Number($('min-samples').value), minSuccess: Number($('min-success').value), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
+    return { model: selectedModel, weights, ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
   }
   function priceRows() {
     const data = activeSnapshot();
@@ -83,7 +65,7 @@
     $('prices-clear').disabled = !prices.entries.length;
     $('saved-prices').innerHTML = prices.entries.map(entry => {
       const row = current.get(entry.key);
-      return `<div class="saved-price"><div><b>${escape(row?.name || entry.name)}</b><p>个人 ${escape(entry.multiplier)}× · ${row ? '公开 ' + escape(row.multiplier) + '×' : '当前模型列表未收录'}</p></div><div>${row ? `<button class="text-button" type="button" data-price-edit="${escape(row.id)}">改价</button>` : ''}<button class="text-button" type="button" data-price-remove="${escape(entry.key)}">恢复公开价</button></div></div>`;
+      return `<div class="saved-price"><div><b>${escape(row?.name || entry.name)}</b><p>个人 ${escape(entry.multiplier)}× · ${row ? '公开 ' + multiplierLabel(row.multiplier) : '当前模型列表未收录'}</p></div><div>${row ? `<button class="text-button" type="button" data-price-edit="${escape(row.id)}">改价</button>` : ''}<button class="text-button" type="button" data-price-remove="${escape(entry.key)}">恢复公开价</button></div></div>`;
     }).join('');
     $('saved-prices').querySelectorAll('[data-price-edit]').forEach(button => button.addEventListener('click', () => { $('prices-dialog').close(); editPrice(button.dataset.priceEdit); }));
     $('saved-prices').querySelectorAll('[data-price-remove]').forEach(button => button.addEventListener('click', () => { prices.remove(button.dataset.priceRemove); priceMessage = '已恢复公开价。'; render(); }));
@@ -105,7 +87,7 @@
     }
   }
   function describePriceImpact(before, after, c) {
-    if (!before || !after) return '该渠道不在当前榜单内，个人价格不会改变公开倍率筛选或黑名单。';
+    if (!before || !after) return '该渠道不在当前榜单内，个人价格不会改变模型范围或黑名单。';
     const change = `第 ${before.overallRank} → ${after.overallRank} 名 · ${format(before.score, 2)} → ${format(after.score, 2)} 分。`;
     const reasons = [];
     if (!after.eligible) reasons.push('仍在观察区：' + after.reasons.join('、') + '。');
@@ -124,7 +106,7 @@
     prices.read();
     const entry = prices.entries.find(entry => entry.key === RouterPrices.key(row));
     $('price-channel').textContent = row.name;
-    $('price-public').textContent = `公开倍率 ${row.multiplier}×`;
+    $('price-public').textContent = `公开倍率 ${multiplierLabel(row.multiplier)}`;
     $('personal-multiplier').value = entry?.multiplier ?? row.multiplier;
     $('price-error').hidden = true;
     $('price-restore').disabled = !entry;
@@ -163,7 +145,7 @@
     $('undo-block').hidden = !undoKey;
   }
   function blockChannel(id) {
-    const row = activeSnapshot().rows.find(r => r.id === id);
+    const row = priceRows().find(r => r.id === id);
     if (!row) return;
     blacklist.block(row); undoKey = RouterBlacklist.key(row);
     if (selected === id) selected = null;
@@ -242,7 +224,7 @@
     try { result = RouterRank.rank(snapshot, configuration()); }
     catch (e) { lastResult = null; $('export').disabled = true; note(e.message, true); return; }
     lastResult = result;
-    $('scope-multiplier').textContent = `公开倍率 ≥ ${format(result.config.minMultiplier, 2)}`;
+    $('scope-multiplier').textContent = '不限倍率、样本数与成功率';
     const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
@@ -272,7 +254,7 @@
     } else {
       $('rec-state').textContent = '暂无入选';
       $('recommend-title').textContent = '当前没有满足门槛的渠道';
-      $('recommend-copy').textContent = blacklist.entries.length ? '可在黑名单恢复渠道，或调整推荐门槛。' : '全部渠道仍在榜单中，可以查看原因或调整推荐门槛。';
+      $('recommend-copy').textContent = blacklist.entries.length ? '可在黑名单恢复渠道，或查看渠道状态。' : '全部渠道仍在榜单中，可以查看具体状态。';
       $('route-chain').innerHTML = '';
     }
     $('tab-all').textContent = `全部 ${result.rows.length}`;
@@ -295,8 +277,8 @@
     $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
       <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
       <td><span class="score-value${r.eligible ? '' : ' score-downgraded'}" title="基础分 ${format(r.baseScore)}；${r.eligible ? '通过门槛：50 + 基础分 × 0.5' : '未通过门槛：基础分 × 0.49'}">${format(r.score)}</span>${r.eligible ? '' : '<small class="metric-note score-downgraded">已降分</small>'}<div class="score-bar" aria-hidden="true">${['gate', ...keys].map(k => `<span class="${k}" style="width:${r.scoreContributions[k]}%"></span>`).join('')}</div></td>
-      <td class="price-cell"><span>${escape(r.multiplier)} ×</span>${r.priceSource === 'personal' ? `<small class="personal-price">个人 · 公开 ${escape(r.publicMultiplier)}×</small>` : ''}<button class="text-button price-edit" type="button" data-price="${escape(r.id)}" aria-label="修改 ${escape(r.channelId)} 号渠道价格">改价</button></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
-      <td class="live-metrics"><div class="${r.success != null && r.success >= result.config.minSuccess ? 'success-good' : 'number-muted'}"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
+      <td class="price-cell"><span>${multiplierLabel(r.multiplier)}</span>${r.priceSource === 'personal' ? `<small class="personal-price">个人 · 公开 ${multiplierLabel(r.publicMultiplier)}</small>` : ''}<button class="text-button price-edit" type="button" data-price="${escape(r.id)}" aria-label="修改 ${escape(r.channelId)} 号渠道价格">改价</button></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
+      <td class="live-metrics"><div class="number-muted"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
     $('rows').querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => { selected = b.dataset.id; render(); }));
     $('rows').querySelectorAll('[data-block]').forEach(b => b.addEventListener('click', () => blockChannel(b.dataset.block)));
     $('rows').querySelectorAll('[data-price]').forEach(b => b.addEventListener('click', () => editPrice(b.dataset.price)));
@@ -319,7 +301,7 @@
     const r = lastResult.rows.find(r => r.id === selected);
     $('detail').hidden = !r || tab === 'blacklist' || !RouterRank.matchesQuery(r, searchQuery);
     if ($('detail').hidden) return;
-    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p>${r.observing ? `<p>${observationHint}</p>` : ''}<p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${escape(r.multiplier)}× · 公开报价 ${escape(r.publicMultiplier)}×</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
+    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p>${r.observing ? `<p>${observationHint}</p>` : ''}<p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${multiplierLabel(r.multiplier)} · 公开报价 ${multiplierLabel(r.publicMultiplier)}</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
       <div class="detail-grid"><div><label>缓存折算倍率 / 越低越好</label><b>${effectiveLabel(r)}×</b><p>${escape(r.multiplier)} ÷ ${percent(r.cache)}；比较指标，非实际账单倍率。</p></div><div><label>${escape(modelLabel())} 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>${escape(modelLabel())} 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown"><span>基础分 ${format(r.baseScore)}：</span>${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
@@ -329,18 +311,7 @@
     $('detail-block').addEventListener('click', () => blockChannel(r.id));
   }
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
-  for (const id of ['min-success', 'min-samples', 'ttft-metric']) $(id).addEventListener('change', render);
-  for (const eventName of ['input', 'change']) $('min-multiplier').addEventListener(eventName, event => {
-    if (!$('min-multiplier').value || !$('min-multiplier').checkValidity()) { if (event.type === 'change') render(); return; }
-    saveMinimumMultiplier();
-    // Avoid rebuilding the clicked row again when an input change loses focus.
-    if (lastResult?.config.minMultiplier === Number($('min-multiplier').value)) return;
-    page = 1; priceMessage = ''; render();
-  });
-  window.addEventListener('storage', event => {
-    if (event.key !== minimumMultiplierKey && event.key !== null) return;
-    readMinimumMultiplier(); page = 1; priceMessage = ''; render();
-  });
+  $('ttft-metric').addEventListener('change', render);
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
   $('model-select').addEventListener('change', event => {
     selectedModel = event.target.value; selected = null; page = 1; tab = 'all';
@@ -349,7 +320,7 @@
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
-  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('min-success').value = 95; $('min-samples').value = 20; $('min-multiplier').value = RouterRank.defaults.minMultiplier; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
+  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {

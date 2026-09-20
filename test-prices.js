@@ -52,13 +52,14 @@ test('personal price changes rank, adjusted multiplier and export without mutati
   assert.equal(blocked.rows.length,1); const outside=R.search(s,blocked,'153').outside[0];
   assert.equal(outside.priceSource,'personal'); assert.equal(outside.multiplier,.18);
   assert.ok(outside.reasons.includes('已被你拉黑'));
-  assert.equal(R.rank(snapshot([{...row,success:50}]),{priceOverrides:[{key:'channel:80',multiplier:.01}]},now).eligible.length,0);
+  assert.equal(R.rank(snapshot([{...row,modelStatus:'failed'}]),{priceOverrides:[{key:'channel:80',multiplier:.01}]},now).eligible.length,0);
 });
-test('default price floor uses public quotes even when a personal discount is lower', () => {
+test('removed price floor preserves public quotes and personal discounts', () => {
   const s=snapshot([row,{...row,id:'b',channelId:'153',multiplier:.3}]);
   const config={minMultiplier:.25,priceOverrides:[{key:'channel:153',multiplier:.1},{key:'channel:80',multiplier:.5}]};
-  assert.deepEqual(R.rank(s,config,now).rows.map(r=>r.channelId),['153']);
-  assert.match(R.search(s,R.rank(s,config,now),'80').outside[0].reasons[0],/0.2×.*0.25×/);
+  assert.deepEqual(R.rank(s,config,now).rows.map(r=>r.channelId),['153','80']);
+  const found=R.search(s,R.rank(s,config,now),'80').rows[0];
+  assert.equal(found.publicMultiplier,.2); assert.equal(found.multiplier,.5);
 });
 test('same channel override is used across models and survives live data refresh', () => {
   const sol='gpt-5.6-sol', s={...snapshot([row]),modelSnapshots:{[sol]:{...snapshot([{...row,model:sol,cache:50}]),model:sol}}};

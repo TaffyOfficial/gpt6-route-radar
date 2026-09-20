@@ -17,7 +17,7 @@ MODELS = {
     'claude-fable-5-1': None,
     'gpt-5.6-sol': 'Codex Pro',
 }
-MIN_MULTIPLIER = .20
+MIN_MULTIPLIER = 0
 ROOT = Path(__file__).resolve().parent
 
 
@@ -75,7 +75,7 @@ def normalize(groups, statuses, pricing, site, captured_at=None, model=MODEL):
         raw_cost = g.get('avg_consumer_amount_by_model', {}).get(model)
         result.append({
             'id': g['id'], 'channelId': g.get('channel_id'), 'name': g['system_display_name'],
-            'source': g['source_label'], 'model': model, 'models': list(dict.fromkeys(g.get('models', []))), 'multiplier': g['multiplier'],
+            'source': g['source_label'], 'model': model, 'models': list(dict.fromkeys(g.get('models', []))), 'multiplier': g.get('multiplier'),
             'lifecycle': g.get('lifecycle_status'), 'verified': g.get('verification_status') == 'passed' and tested.get('status') == 'passed' and tested.get('listed') is True,
             'observing': g.get('observing') is True, 'modelStatus': m.get('status', 'unknown'),
             'modelRequests': m.get('request_count', 0), 'modelWindowHours': m.get('sample_window'),
@@ -89,8 +89,8 @@ def normalize(groups, statuses, pricing, site, captured_at=None, model=MODEL):
             **status_fields(status, list(dict.fromkeys(g.get('models', []))), model),
         })
     timestamp = captured_at or datetime.now(timezone.utc).isoformat()
-    rows = [r for r in result if isinstance(r['multiplier'], (int, float)) and r['multiplier'] >= MIN_MULTIPLIER]
-    lookup_rows = [r for r in result if r not in rows]
+    rows = result
+    lookup_rows = []
     return {
         'schemaVersion': 2, 'capturedAt': timestamp, 'liveCapturedAt': timestamp,
         'model': model, 'source': MODELS[model], 'minMultiplier': MIN_MULTIPLIER,

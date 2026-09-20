@@ -1,41 +1,40 @@
-# Cloudflare 静态页面与 R2 数据
+# Cloudflare Pages 与私有 R2
 
-- 页面：https://gpt6-route-radar.new-api-custom.workers.dev
-- 数据：https://radar-data.viwo50when4.xyz/latest.json.gz
-- R2 桶：`gpt6-route-radar-data`，Standard 存储。
+网站：https://route-radar.pages.dev
 
-Wrangler 4.135.0 创建新 Pages 项目时转为 Workers 静态资源托管。当前页面没有动态处理程序，访客请求由静态资源服务响应；数据读取直接走 R2 自定义域名与 CDN，不经过采集服务器或上传 Worker。
+浏览器仅请求本站页面和 `/api/snapshot`。页面使用 Cloudflare 的 `pages.dev` 域名；R2 没有自定义域名，`r2.dev` 公共访问也关闭。通过 Pages 的 R2 binding 在 Cloudflare 内部读取快照，不暴露自有域名或采集服务器地址。
 
-## 日常数据更新
+## 两条独立路径
 
-服务器每 10 分钟运行 `publish_r2.py`，调用现有采集器收集全部模型，压缩后以 HTTPS PUT 发送到专用上传 Worker。上传 Worker 校验凭证、格式、模型完整性、大小和新鲜度，只能覆盖桶内 `latest.json.gz`。采集或校验失败不覆盖旧数据。一次成功刷新只写一个对象，不调用网站部署接口。
+1. 服务器每 10 分钟采集五个模型，通过带专用凭证的上传入口覆盖 R2 桶 `gpt6-route-radar-data` 的 `latest.json.gz`。每次只写一份数据，不构建或部署网站。
+2. 网页每 60 秒请求同站 `/api/snapshot`。Pages Function 读取私有 R2 并解压 JSON，使用 60 秒共享缓存；忽略查询字符串，随机参数不会产生独立 R2 缓存键。
 
-`.gz` 属于 Cloudflare 默认可缓存扩展名；对象设置 `Content-Type: application/json`、`Content-Encoding: gzip` 和 `Cache-Control: public, max-age=60`，浏览器自动解压。实测域名将浏览器缓存 TTL 提升到 4 小时，因此网页按 UTC 分钟追加统一版本参数，同一分钟的访客共享相同 URL，避免浏览器继续使用数小时前的数据；CDN 对象本身使用 60 秒缓存。不会为每个访客产生随机参数。CORS 只允许本站和原 GitHub Pages origin 读取。
+`_routes.json` 只让 `/api/snapshot` 调用函数；HTML、JS、CSS 等静态请求不调用函数。数据端点计入 Pages Functions / Workers 请求额度，缓存减少 R2 读取，不能消除函数调用计数。R2 存储及操作额度单独计算，不能把它等同于页面构建额度或无限免费访问。
 
-上传入口只接受带专用令牌的 PUT，不提供公共数据读取。服务器没有 Cloudflare 管理凭证；上传 Worker 的 R2 binding 只指向本项目桶。此 Worker 正常每月调用约 4320 次；R2 写入约 4320 次。静态页面请求、Worker 请求与 R2 存储/操作额度是不同项目，不能混算；R2 超额仍可能计费。
-
-## 更新页面
-
-在服务器构建，或在已配置采集环境的维护电脑执行：
+## 页面发布
 
 ```sh
-python3 build_pages.py --hosting Cloudflare --snapshot-url https://radar-data.viwo50when4.xyz/latest.json.gz --refresh-minutes 10
-npx wrangler@4.135.0 deploy
+python3 build_pages.py --pages
+npx wrangler@4.24.0 pages deploy dist --project-name route-radar --branch main
 ```
 
-服务器没有维护电脑的 OAuth 登录。也可将服务器生成的 `dist/` 取回已登录 Cloudflare 的维护电脑，再执行部署命令。仅上传白名单静态产物。不要将仓库根目录设为 assets 目录。
+采集环境在服务器时，可将服务器构建的 `dist/` 传回已登录 Cloudflare 的维护电脑，再执行上传。`--pages` 会将同站数据函数和路由声明加入白名单产物，浏览器运行配置只包含相对地址 `/api/snapshot`。
 
-上传入口代码修改时独立部署：
+固定使用上述 Pages 部署命令；新版 CLI 的新项目创建流程可能改为 Workers 静态托管。不要在仓库根目录直接创建静态资产 Worker，也不要把根目录作为 assets 目录。
+
+## 服务器与上传入口
+
+服务器的 systemd 服务和 timer 见 [运维说明](README.md)。服务器只发出上传请求，不接收访客流量。服务继续使用 `/opt/gpt6-route-radar/collect.py` 和 `publish_r2.py`；改采集器后需要同步服务器文件。
+
+专用上传 Worker 只接受带 `UPLOAD_TOKEN` 的 PUT，验证格式、完整性和采集时间，只能覆盖本项目快照。服务器只有对应的专用上传令牌，没有 Cloudflare 账号管理凭证。上传代码更新使用：
 
 ```sh
 node test-r2-upload.mjs
-npx wrangler@4.135.0 deploy --config deploy/r2-upload/wrangler.jsonc
+npx wrangler@4.24.0 deploy --config deploy/r2-upload/wrangler.jsonc
 ```
 
-`UPLOAD_TOKEN` 保存在 Worker secret 中，与服务器 root-only 环境文件中的专用令牌一致，不写入 wrangler 配置。
+## 旧入口
 
-## 状态与限制
+旧 Workers 网站地址只跳转到新 Pages 站点。自有数据域名绑定已移除；不要重新公开 R2 或绑定自有域名。原 GitHub 采集 Action 保持禁用，旧 GitHub Pages 不再同步刷新。
 
-旧 GitHub 采集 Action 保持禁用，旧 GitHub Pages 不再同步刷新。服务器 timer 已改为 R2 数据更新，与页面部署完全独立。切换网站 origin 后浏览器 localStorage 不会自动迁移，因此原站保存的个人报价、黑名单需在新站重新设置。
-
-公网 CDN 承担访客流量，不等于无限免费或绝对不会中断。随机查询参数等缓存未命中仍可能增加 R2 读取；需要结合 Cloudflare 用量观察。采集服务器不作为公开页面或数据源站。
+网站 origin 改变后，旧站 localStorage 中的个人报价和黑名单不会自动转移到新站。
