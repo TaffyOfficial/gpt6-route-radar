@@ -1,6 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
-const { rank, plan, paginate, applyStatus, search } = require('./rank.js');
+const { rank, plan, paginate, sortRows, applyStatus, search } = require('./rank.js');
 const now = Date.UTC(2026, 8, 17, 10);
 const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .20, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
 const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete: true });
@@ -237,5 +237,34 @@ test('live cache updates and model selection recalculate adjusted multipliers', 
   const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'a',models:[{model,cache_hit_rate:50}]}]});
   assert.equal(rank(updated,{model},now+1000).rows[0].effectiveMultiplier,.4);
   assert.equal(rank(updated,{},now+1000).rows[0].effectiveMultiplier,null);
+});
+test('column sorting orders the full result before pagination without changing score ranks', () => {
+  const result = rank(snap([make({id:'a',multiplier:.4}),make({id:'b',multiplier:.1}),make({id:'c',multiplier:.2})]),{},now);
+  const original = result.rows.map(r=>[r.id,r.overallRank]);
+  const sorted = sortRows(result.rows,'multiplier','asc');
+  assert.deepEqual(sorted.map(r=>r.id),['b','c','a']);
+  assert.equal(paginate(sorted,2,1).rows[0].id,'c');
+  assert.deepEqual(sortRows(result.rows,'multiplier','desc').map(r=>r.id),['a','c','b']);
+  assert.deepEqual(result.rows.map(r=>[r.id,r.overallRank]),original);
+  assert.deepEqual(sortRows(result.rows,'score','desc'),result.rows);
+});
+test('missing column values stay last in either direction and equal values keep score order', () => {
+  const rows = [{id:'missing',success:null},{id:'a',success:0},{id:'b',success:90},{id:'tie',success:90},{id:'nan',success:NaN}];
+  assert.deepEqual(sortRows(rows,'success','asc').map(r=>r.id),['a','b','tie','missing','nan']);
+  assert.deepEqual(sortRows(rows,'success','desc').map(r=>r.id),['b','tie','a','missing','nan']);
+  assert.deepEqual(sortRows([{latency:0},{latency:20},{latency:10}],'latency','asc').map(r=>r.latency),[10,20,0]);
+  const effective = [{id:'missing',effectiveMultiplier:null},{id:'infinite',cache:0,multiplier:.2},{id:'finite',effectiveMultiplier:.3}];
+  assert.deepEqual(sortRows(effective,'effectiveMultiplier','asc').map(r=>r.id),['finite','infinite','missing']);
+  assert.deepEqual(sortRows(effective,'effectiveMultiplier','desc').map(r=>r.id),['infinite','finite','missing']);
+});
+test('Terra selection uses its own metrics and never falls back to Astra channels', () => {
+  const model='gpt-5.6-terra';
+  const s={...snap([make()]),modelSnapshots:{[model]:{...snap([make({id:'terra',model,success:72,cache:40}),make({id:'wrong',model:'gpt-6-astra'})]),model}}};
+  const result=rank(s,{model},now);
+  assert.deepEqual(result.rows.map(r=>r.id),['terra']);
+  assert.equal(result.rows[0].success,72);
+  assert.equal(result.rows[0].cache,40);
+  assert.equal(plan(s,{model},now).model,model);
+  assert.equal(rank(snap([make()]),{model},now).rows.length,0);
 });
 console.log(`${tests} tests passed`);

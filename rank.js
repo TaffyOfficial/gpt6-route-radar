@@ -8,7 +8,8 @@
     { id: 'claude-opus-5', label: 'Opus 5', source: null },
     { id: 'claude-sonnet-5', label: 'Sonnet 5', source: null },
     { id: 'claude-fable-5-1', label: 'Fable 5.1', source: null },
-    { id: 'gpt-5.6-sol', label: 'GPT5.6 Sol', source: 'Codex Pro' }
+    { id: 'gpt-5.6-sol', label: 'GPT5.6 Sol', source: 'Codex Pro' },
+    { id: 'gpt-5.6-terra', label: 'GPT5.6 Terra', source: 'Codex Pro' }
   ];
   function modelInfo(id) { return models.find(m => m.id === id); }
   function selectSnapshot(snapshot, model = defaults.model) {
@@ -47,6 +48,22 @@
     const page = clamp(Math.floor(Number(requestedPage) || 1), 1, pages);
     const start = (page - 1) * size;
     return { page, pages, size, total: rows.length, start, end: Math.min(start + size, rows.length), rows: rows.slice(start, start + size) };
+  }
+  function sortRows(rows, key = 'score', direction = 'desc') {
+    const allowed = ['overallRank', 'score', 'multiplier', 'effectiveMultiplier', 'latency', 'cache', 'success', 'groupSuccess', 'historicalCost'];
+    if (!allowed.includes(key)) return [...rows];
+    const value = row => {
+      if (key === 'effectiveMultiplier' && row.cache === 0 && finite(row.multiplier) && row.multiplier >= 0) return Infinity;
+      const v = row[key];
+      return finite(v) && (key !== 'latency' || v > 0) ? v : null;
+    };
+    return [...rows].sort((a, b) => {
+      const av = value(a), bv = value(b);
+      // Unknown values stay last in both directions. Ties retain score order.
+      if (av === null || bv === null) return av === bv ? 0 : av === null ? 1 : -1;
+      if (av === bv) return 0;
+      return (av < bv ? -1 : 1) * (direction === 'asc' ? 1 : -1);
+    });
   }
   function config(input = {}) {
     const c = { ...defaults, ...input, weights: { ...defaults.weights, ...input.weights } };
@@ -157,5 +174,5 @@
     const { priceOverrides, ...scoring } = result.config;
     return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: modelInfo(result.config.model).source, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'eligibility_bands_v1', priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
-  return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, matchesQuery, search };
+  return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, sortRows, matchesQuery, search };
 });

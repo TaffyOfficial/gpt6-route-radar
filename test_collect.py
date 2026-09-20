@@ -92,7 +92,7 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNone(collect.normalize([group], *args)['rows'][0]['historicalCost'])
 
     def test_selected_model_controls_source_verification_cost_and_status(self):
-        models = ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol']
+        models = ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol', 'gpt-5.6-terra']
         for model in models:
             with self.subTest(model=model):
                 source = 'Codex Pro' if model.startswith('gpt') else 'CC-Max'
@@ -116,6 +116,20 @@ class CollectorTests(unittest.TestCase):
                 self.assertFalse(row['verified'])
                 self.assertIsNone(row['historicalCost'])
 
+    def test_terra_keeps_only_supported_codex_channels_and_its_own_pricing(self):
+        terra = 'gpt-5.6-terra'
+        group = {'id': 'terra', 'models': [terra], 'source_label': 'Codex Pro',
+                 'multiplier': .1, 'system_display_name': 'Terra channel'}
+        unsupported = {**group, 'id': 'astra-only', 'models': [collect.MODEL]}
+        other_source = {**group, 'id': 'other-source', 'source_label': 'Other'}
+        price = {'model_name': terra, 'model_ratio': .3}
+        out = collect.normalize([group, unsupported, other_source], {'data': []},
+                                {'priced_model_details': [{'model_name': collect.MODEL}, price]},
+                                {'data': {'quota_per_unit': 500000}}, model=terra)
+        self.assertEqual([row['id'] for row in out['rows']], ['terra'])
+        self.assertEqual(out['pricing'], price)
+        self.assertEqual(out['model'], terra)
+
     def test_collect_all_reuses_shared_responses_and_includes_every_model(self):
         def one(model, shared):
             self.assertIn('statuses', shared)
@@ -123,7 +137,7 @@ class CollectorTests(unittest.TestCase):
         with patch.object(collect, 'get_json', return_value={'data': []}) as get, patch.object(collect, 'collect', side_effect=one) as run:
             out = collect.collect_all()
             self.assertEqual(get.call_count, 3)
-            self.assertEqual(run.call_count, 5)
+            self.assertEqual(run.call_count, 6)
             self.assertEqual(out['model'], collect.MODEL)
             self.assertEqual(set(out['modelSnapshots']), set(collect.MODELS) - {collect.MODEL})
 

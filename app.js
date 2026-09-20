@@ -27,6 +27,7 @@
     labels.cost = info.label + ' 实扣';
   }
   let tab = 'all', selected = null, activePreset = 'balanced', lastResult = null, pendingRefresh = false;
+  let sortKey = 'score', sortDirection = 'desc';
   let page = 1, pageSize = 20, pageResult = null, pendingLive = false, refreshError = '', liveError = '';
   let lastLiveAttempt = 0, lastFullAttempt = 0;
   let snapshotCheckAt = 0, snapshotCheckState = '';
@@ -281,18 +282,19 @@
     $('tab-eligible').setAttribute('aria-pressed', String(tab === 'eligible'));
     $('tab-excluded').setAttribute('aria-pressed', String(tab === 'excluded'));
     $('eligible-count').textContent = `${result.rows.length} 个渠道 · 总量不限`;
-    $('board-description').textContent = tab === 'blacklist' ? '你的本地黑名单 · 可随时恢复 · 不跨浏览器同步' : tab === 'all' ? '可推荐 50–100 分 · 观察区 0–49 分 · 按综合分排序' : tab === 'eligible' ? '已通过推荐门槛 · 50–100 分 · 按综合分排序' : '未通过推荐门槛，已降至 0–49 分';
+    $('board-description').textContent = tab === 'blacklist' ? '你的本地黑名单 · 可随时恢复 · 不跨浏览器同步' : tab === 'all' ? '可推荐 50–100 分 · 观察区 0–49 分' : tab === 'eligible' ? '已通过推荐门槛 · 50–100 分' : '未通过推荐门槛，已降至 0–49 分';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
+    renderSort();
     const allShown = (tab === 'blacklist' ? [] : tab === 'all' ? result.rows : result[tab]).filter(r => RouterRank.matchesQuery(r, searchQuery));
-    pageResult = RouterRank.paginate(allShown, page, pageSize);
+    pageResult = RouterRank.paginate(RouterRank.sortRows(allShown, sortKey, sortDirection), page, pageSize);
     page = pageResult.page;
     const shown = pageResult.rows;
     $('empty').hidden = shown.length > 0;
     $('empty').textContent = tab === 'all' ? (blacklist.entries.length ? '当前没有可显示的渠道。可在黑名单中恢复，或调整筛选条件。' : '没有符合当前筛选条件的渠道。') : tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区或黑名单。' : '没有处于观察区的渠道。';
     if (searchQuery.trim()) $('empty').textContent = found.rows.length ? '当前标签没有匹配结果，切换「全部」查看。' : found.outside.length ? '该渠道未上榜，原因见下方。' : '没有匹配的渠道。';
     $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
-      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="完整榜单第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
+      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="综合评分第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
       <td><span class="score-value${r.eligible ? '' : ' score-downgraded'}" title="基础分 ${format(r.baseScore)}；${r.eligible ? '通过门槛：50 + 基础分 × 0.5' : '未通过门槛：基础分 × 0.49'}">${format(r.score)}</span>${r.eligible ? '' : '<small class="metric-note score-downgraded">已降分</small>'}<div class="score-bar" aria-hidden="true">${['gate', ...keys].map(k => `<span class="${k}" style="width:${r.scoreContributions[k]}%"></span>`).join('')}</div></td>
       <td class="price-cell"><span>${multiplierLabel(r.multiplier)}</span>${r.priceSource === 'personal' ? `<small class="personal-price">个人 · 公开 ${multiplierLabel(r.publicMultiplier)}</small>` : ''}<button class="text-button price-edit" type="button" data-price="${escape(r.id)}" aria-label="修改 ${escape(r.channelId)} 号渠道价格">改价</button></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
       <td class="live-metrics"><div class="number-muted"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
@@ -302,6 +304,28 @@
     renderPagination();
     renderDetail();
   }
+  function renderSort() {
+    document.querySelectorAll('[data-sort]').forEach(button => {
+      const active = button.dataset.sort === sortKey;
+      button.closest('th').setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+      button.querySelector('.sort-arrow').textContent = active ? (sortDirection === 'asc' ? '↑' : '↓') : '↑↓';
+      const next = active ? (sortDirection === 'asc' ? '降序' : '升序') : (['score', 'cache', 'success', 'groupSuccess'].includes(button.dataset.sort) ? '降序' : '升序');
+      button.title = '点击按此列' + next + '排列';
+      button.setAttribute('aria-label', button.textContent.replace(/[↑↓]/g, '').trim() + '，' + button.title);
+    });
+    if (tab !== 'blacklist') {
+      const button = document.querySelector(`[data-sort="${sortKey}"]`);
+      const label = button.textContent.replace(/[↑↓]/g, '').trim();
+      $('board-description').textContent += ` · 按${label}${sortDirection === 'asc' ? '升序' : '降序'} · 点击表头切换`;
+    }
+  }
+  document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
+    const key = button.dataset.sort;
+    sortDirection = sortKey === key ? (sortDirection === 'asc' ? 'desc' : 'asc') : (['score', 'cache', 'success', 'groupSuccess'].includes(key) ? 'desc' : 'asc');
+    sortKey = key;
+    page = 1;
+    render();
+  }));
   function renderPagination() {
     const p = pageResult;
     $('page-summary').textContent = `共 ${p.total} 条 · ${p.total ? p.start + 1 : 0}–${p.end} 条 · 第 ${p.page}/${p.pages} 页`;
@@ -347,7 +371,7 @@
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
-  $('reset').addEventListener('click', () => { activePreset = 'balanced'; setWeights(presetWeights.balanced); for (const id of ['min-success', 'min-samples', 'min-multiplier']) $(id).value = 0; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
+  $('reset').addEventListener('click', () => { sortKey = 'score'; sortDirection = 'desc'; page = 1; activePreset = 'balanced'; setWeights(presetWeights.balanced); for (const id of ['min-success', 'min-samples', 'min-multiplier']) $(id).value = 0; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {
