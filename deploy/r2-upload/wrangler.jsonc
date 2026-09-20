@@ -1,0 +1,8 @@
+{
+  "name": "gpt6-route-radar-upload",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-09-18",
+  "account_id": "5426cd90989628761e32c6aee9204ec6",
+  "r2_buckets": [{ "binding": "SNAPSHOTS", "bucket_name": "gpt6-route-radar-data" }],
+  "observability": { "enabled": false }
+}

@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent
 PUBLIC_FILES = ('index.html', 'style.css', 'app.js', 'rank.js', 'blacklist.js', 'prices.js', 'snapshot.json', 'snapshot.js')
 
 
-def build(destination, refresh=True, snapshot_url=None, hosting='GitHub Pages'):
+def build(destination, refresh=True, snapshot_url=None, hosting='GitHub Pages', refresh_minutes=None):
     if snapshot_url:
         parsed = urlsplit(snapshot_url)
         if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -41,6 +41,8 @@ def build(destination, refresh=True, snapshot_url=None, hosting='GitHub Pages'):
     settings['hosting'] = hosting
     if snapshot_url:
         settings['snapshotUrl'] = snapshot_url
+        if refresh_minutes:
+            settings['refreshMinutes'] = refresh_minutes
     (destination / 'runtime.js').write_text('window.ROUTER_RUNTIME = ' + json.dumps(settings) + ';\n', encoding='utf-8')
     (destination / '.nojekyll').write_text('', encoding='utf-8')
     print(f"Built {snapshot['count']} channels at {snapshot['capturedAt']}")
@@ -53,5 +55,6 @@ if __name__ == '__main__':
     parser.add_argument('--no-refresh', action='store_true', help='Use an existing snapshot for local build tests')
     parser.add_argument('--snapshot-url', help='Public HTTPS snapshot served independently from the site')
     parser.add_argument('--hosting', default='GitHub Pages')
+    parser.add_argument('--refresh-minutes', type=int, help='Actual independent collector timer interval')
     args = parser.parse_args()
-    build(args.output, refresh=not args.no_refresh, snapshot_url=args.snapshot_url, hosting=args.hosting)
+    build(args.output, refresh=not args.no_refresh, snapshot_url=args.snapshot_url, hosting=args.hosting, refresh_minutes=args.refresh_minutes)

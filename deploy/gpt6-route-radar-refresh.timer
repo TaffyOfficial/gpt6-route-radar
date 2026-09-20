@@ -1,5 +1,5 @@
 [Unit]
-Description=Check Route Radar every ten minutes independently of GitHub cron
+Description=Update Route Radar data in R2 every ten minutes without deploying the site
 
 [Timer]
 OnCalendar=*-*-* *:03/10:00

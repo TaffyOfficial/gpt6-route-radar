@@ -257,7 +257,7 @@
     $('scope-count').textContent = `${result.rows.length + result.blocked.length} 条符合当前筛选${blacklist.entries.length ? ' · 已拉黑 ' + blacklist.entries.length : ''}`;
     if (refreshError || liveError) note([refreshError, liveError].filter(Boolean).join('；'), true);
     else if (activeSnapshot().complete !== true) note('当前快照尚未包含所选模型的完整数据，请刷新行情或等待后台采集。');
-    else if (result.stale) note(staticHosting ? '快照已过期，暂无有效调度建议。请等待维护者从服务器推送更新。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
+    else if (result.stale) note(staticHosting ? '快照已过期，暂无有效调度建议。请等待新的完整快照，再检查更新。' : '行情或成功率已过期，显示最近一次数据；刷新后可导出建议。');
     else if (!online) note('当前为离线快照。运行 启动.ps1 可刷新行情。');
     else if (!pendingRefresh) note('');
     $('export').disabled = result.stale || !result.eligible.length;
@@ -407,8 +407,10 @@
     try {
       const externalSnapshot = window.ROUTER_RUNTIME?.snapshotUrl;
       const url = new URL(externalSnapshot || 'snapshot.json', location.href);
-      // Keep CDN URLs stable: per-visitor timestamps would bypass shared caching.
-      if (!externalSnapshot) url.searchParams.set('t', String(Date.now()));
+      // All visitors share one URL per minute. This also avoids a zone's longer
+      // browser-cache TTL freezing live data, without per-visitor cache busting.
+      if (externalSnapshot) url.searchParams.set('minute', String(Math.floor(Date.now() / 60000)));
+      else url.searchParams.set('t', String(Date.now()));
       const response = await fetch(url.href, { cache: externalSnapshot ? 'default' : 'no-store', credentials: 'omit', signal: AbortSignal.timeout(30000) });
       if (!response.ok) throw Error('快照读取失败（' + response.status + '）');
       const data = await response.json();
@@ -441,6 +443,11 @@
   });
   if (staticHosting) {
     $('hosting-note').hidden = false;
+    if (window.ROUTER_RUNTIME?.snapshotUrl) {
+      const interval = window.ROUTER_RUNTIME.refreshMinutes;
+      $('hosting-note').firstChild.textContent = `线上行情快照 · ${interval ? `每 ${interval} 分钟更新数据` : '数据独立更新'}，页面每 60 秒检查，缓存可能延迟约 1 分钟。`;
+      $('collection-recovery').textContent = '暂无更新的数据。请稍后再次检查；采集失败时保留上一份完整快照。';
+    }
     $('auto-refresh-label').textContent = '每 60 秒检查新快照';
     $('refresh').textContent = refreshLabel;
     $('footer-mode').textContent = `开源排行榜 · ${window.ROUTER_RUNTIME?.hosting || '静态站点'} · ${window.ROUTER_RUNTIME?.snapshotUrl ? '独立快照' : '手动发布'}`;

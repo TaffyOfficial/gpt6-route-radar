@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { gzipSync } from 'node:zlib';
+import worker from './deploy/r2-upload/worker.mjs';
+
+const capturedAt = new Date().toISOString();
+const base = { schemaVersion: 2, complete: true, capturedAt, rows: [], count: 0 };
+const snapshot = { ...base, modelSnapshots: Object.fromEntries(['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol'].map(m => [m, { ...base }])) };
+const writes = [];
+const env = { UPLOAD_TOKEN: 'test-only', SNAPSHOTS: { put: async (...args) => writes.push(args) } };
+const request = (data, token = 'test-only') => new Request('https://upload.example/snapshot', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: gzipSync(JSON.stringify(data)) });
+assert.equal((await worker.fetch(request(snapshot, 'wrong'), env)).status, 401);
+assert.equal((await worker.fetch(request({ ...snapshot, modelSnapshots: {} }), env)).status, 400);
+assert.equal((await worker.fetch(request({ ...snapshot, capturedAt: '2020-01-01T00:00:00Z' }), env)).status, 400);
+assert.equal(writes.length, 0);
+assert.equal((await worker.fetch(request(snapshot), env)).status, 200);
+assert.equal(writes.length, 1);
+assert.equal(writes[0][0], 'latest.json.gz');
+assert.equal(writes[0][2].httpMetadata.contentEncoding, 'gzip');
+assert.equal(writes[0][2].httpMetadata.cacheControl, 'public, max-age=60');
+assert.equal((await worker.fetch(new Request('https://upload.example/snapshot'), env)).status, 404);
+console.log('R2 upload validation, authorization, gzip metadata and public-read isolation passed');

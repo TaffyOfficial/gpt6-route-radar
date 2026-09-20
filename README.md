@@ -1,6 +1,6 @@
 # Route Radar · 多模型渠道雷达
 
-[在线使用](https://taffyofficial.github.io/gpt6-route-radar/) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [发布记录](https://github.com/TaffyOfficial/gpt6-route-radar/commits/gh-pages/)
+[在线使用](https://gpt6-route-radar.new-api-custom.workers.dev) · [源码](https://github.com/TaffyOfficial/gpt6-route-radar) · [部署说明](deploy/CLOUDFLARE.md)
 
 MIT 开源。公开行情数据来自 CodeGo，数据权利归原提供方。
 
@@ -44,22 +44,19 @@ Fable 5.1 使用市场实际收录的 `claude-fable-5-1`，不与其他别名混
 
 成功率来自 CodeGo 官方 `/api/group-status`。同时展示 所选模型最新成功率、渠道整体最新成功率，以及市场近 24h 成功率。界面注明采集时间、统计窗口和样本量；渠道窗口按该渠道子模型一致的窗口展示，不一致时标为未标注。
 
-GitHub Pages 版：维护者在服务器手动采集、构建静态文件并推送 `gh-pages`，原采集工作流及服务器定时器已暂停。网页每 60 秒检查同站新快照，不跨域访问源站，不含 Key，也不运行 Python 服务。手动「检查新快照」不触发新的采集。
+Cloudflare 静态版：服务器每 10 分钟采集全部模型并将一份压缩 JSON 上传至 R2，网页每 60 秒检查新快照，CDN 缓存约 60 秒。数据更新不触发网站部署或 GitHub Actions。访客流量由 Cloudflare 承担，不访问采集服务器。
 
-如果行情时间一直不变，先看页面的「最近检查」：暂无新数据表示读取成功，但服务器尚未发布新快照；读取失败表示页面请求失败。维护者在服务器执行 `systemctl start gpt6-route-radar-refresh.service`，完成后再检查快照；运维方法见 [服务器手动发布](deploy/README.md)。
+网页的「检查新快照」只读取数据，不触发采集；采集失败保留上一份完整快照和真实时间。服务器可执行 `systemctl start gpt6-route-radar-refresh.service` 立即更新数据，详见 [运维说明](deploy/README.md)。
 
 本地版：页面可见且自动刷新开启时每 60 秒刷新成功率，每 5 分钟刷新行情与模型列表。更新失败保留旧数据并提示，不将旧值冒充最新。页面关闭后停止本地刷新。
 
-## GitHub Pages 部署
+## Cloudflare 部署
 
-1. 源码保存在 `main`，服务器使用本仓库的可写 SSH deploy key。
-2. 服务器运行 `deploy/publish_pages.py`，从当前 `main` 临时检出，采集全部模型并构建 `dist/`，再推送到 `gh-pages`。
-3. 在 **Settings → Pages → Build and deployment → Source** 选择 **Deploy from a branch**，分支选择 `gh-pages`，目录选择 `/ (root)`。
-4. 后续在服务器手动执行 `systemctl start gpt6-route-radar-refresh.service` 更新页面；推送源码到 `main` 不会自动采集发布。
+页面由 Workers 静态资源托管，行情由 R2 自定义域名提供。`wrangler.jsonc` 仅允许上传 `dist/`，不包含服务端程序、凭证或日志。
 
-原采集工作流已禁用，并移除了 push 和 schedule 触发；服务器 timer 也已禁用。GitHub 仍会执行自带的 Pages 分支发布任务，它只发布服务器推送的静态文件，不运行本项目采集器。
+更新页面时构建并运行 `npx wrangler@4.135.0 deploy`；日常行情更新只上传 R2 对象，不执行部署。页面保留内置快照供首次加载及网络失败时使用，过期保护始终生效。
 
-采集或构建失败会在推送前退出，保留上一版 Pages。`build_pages.py` 只发布明确列出的网页资源和公开行情快照；本机服务、测试、配置和日志不会打包。每次手动发布产生一条 `gh-pages` 提交，不修改 `main` 或 `server-refresh`。
+原 GitHub 采集 Action 保持禁用，GitHub Pages 仅保留旧版，不再同步更新。服务器原同名 systemd 服务已改为 R2 数据上传，timer 每 10 分钟执行。安装、配置和更新方法见 [Cloudflare 部署](deploy/CLOUDFLARE.md)。
 
 ## 打开
 
@@ -102,6 +99,6 @@ GitHub Pages 版：维护者在服务器手动采集、构建静态文件并推�
 
 `collect.py` 负责公开数据采集和完整性检查；`rank.js` 是可复用评分器；`server.py` 提供仅绑定 127.0.0.1 的本地服务；`snapshot.json` 保存公开快照。
 
-运行 `node test-rank.js`、`node test-blacklist.js`、`node test-prices.js` 和 `python -m unittest test_collect.py test_pages.py test_trigger.py test_publish.py` 检查筛选、黑名单、个人报价及存储恢复、权重上限、过期保护、分页完整性、公开文件白名单及服务器发布脚本。运行 `python build_pages.py` 采集并构建静态站点。
+运行 `node test-r2-upload.mjs`、`node test-rank.js`、`node test-blacklist.js`、`node test-prices.js` 和 `python -m unittest test_collect.py test_pages.py test_trigger.py test_publish.py` 检查筛选、黑名单、个人报价及存储恢复、权重上限、过期保护、分页完整性、公开文件白名单及服务器发布脚本。运行 `python build_pages.py` 采集并构建静态站点。
 
 采集器默认直连，避免继承失效的本机代理。如确需系统代理，可在启动前设置环境变量 `ROUTER_USE_PROXY=1`。

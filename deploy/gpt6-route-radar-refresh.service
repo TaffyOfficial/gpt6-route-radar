@@ -1,5 +1,5 @@
 [Unit]
-Description=Manually collect and publish Route Radar to gh-pages
+Description=Collect Route Radar and upload a snapshot to Cloudflare R2
 Wants=network-online.target
 After=network-online.target
 
@@ -7,7 +7,8 @@ After=network-online.target
 Type=oneshot
 User=route-radar
 Group=route-radar
-ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/publish_pages.py --key /etc/gpt6-route-radar/deploy_key --known-hosts /etc/gpt6-route-radar/known_hosts
+EnvironmentFile=/etc/gpt6-route-radar/r2-upload.env
+ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/publish_r2.py
 StateDirectory=gpt6-route-radar
 UMask=0077
 TimeoutStartSec=900

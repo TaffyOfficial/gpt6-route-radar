@@ -1,18 +1,41 @@
-# Cloudflare Pages 与独立行情快照
+# Cloudflare 静态页面与 R2 数据
 
-页面和数据使用不同的更新通道，不能把 R2 写入额度当成 Pages 构建额度。
+- 页面：https://gpt6-route-radar.new-api-custom.workers.dev
+- 数据：https://radar-data.viwo50when4.xyz/latest.json.gz
+- R2 桶：`gpt6-route-radar-data`，Standard 存储。
 
-- 当前静态站：https://gpt6-route-radar.new-api-custom.workers.dev 。Wrangler 4.135.0 创建新 Pages 项目时实际转为 Workers 静态资源托管；仓库明确配置仅上传 `dist/`。
-- 页面：服务器运行 `python3 build_pages.py --hosting 'Cloudflare Pages'`，仅将生成的 `dist/` 传回已登录 Cloudflare 的维护电脑，在仓库运行 `npx wrangler@4.135.0 deploy`。R2 接通后仅修改页面代码时需要部署。
-- 数据：服务器采集后仅覆盖 R2 的 `snapshot.json`。每 10 分钟一次，30 天约 4320 次对象写入，不调用 Pages 部署接口。
-- 页面使用 `python build_pages.py --hosting 'Cloudflare Pages' --snapshot-url https://<数据域名>/snapshot.json` 构建即可读取独立快照。内置快照作为加载和网络失败时的备用，过期保护继续生效。
+Wrangler 4.135.0 创建新 Pages 项目时转为 Workers 静态资源托管。当前页面没有动态处理程序，访客请求由静态资源服务响应；数据读取直接走 R2 自定义域名与 CDN，不经过采集服务器或上传 Worker。
 
-## R2 开通后配置
+## 日常数据更新
 
-1. 创建 Standard 存储桶，仅存放公开快照；服务器凭证只允许访问该桶。
-2. 使用 R2 自定义域名接入 CDN，不使用仅供开发的 `r2.dev`。
-3. 配置 CORS：允许页面的 HTTPS origin、GET/HEAD；不允许浏览器写入。
-4. 为 `snapshot.json` 设置 `Content-Type: application/json`、`Cache-Control: public, max-age=60`，配置 CDN 缓存规则让 JSON 可缓存。缓存键忽略查询字符串，避免随机参数导致回源。不要把数据域名指向采集服务器。
-5. 所有模型采集完整后再上传一个 JSON 对象；失败保留上一份对象。验证内容、CORS、缓存和更新时间后，才启用服务器数据更新定时器。
+服务器每 10 分钟运行 `publish_r2.py`，调用现有采集器收集全部模型，压缩后以 HTTPS PUT 发送到专用上传 Worker。上传 Worker 校验凭证、格式、模型完整性、大小和新鲜度，只能覆盖桶内 `latest.json.gz`。采集或校验失败不覆盖旧数据。一次成功刷新只写一个对象，不调用网站部署接口。
 
-目前账号 R2 尚未开通，线上暂时读取本次构建附带的快照，独立快照读取功能已准备但未启用。开通可能涉及付款方式和按量计费授权；免费额度不是零费用上限。未完成 R2 配置时不要启用定时部署。GitHub 采集工作流和旧服务器 timer 保持禁用，现有手动 systemd 服务仍是 GitHub 发布入口，不代表已经改为 Cloudflare 上传。
+`.gz` 属于 Cloudflare 默认可缓存扩展名；对象设置 `Content-Type: application/json`、`Content-Encoding: gzip` 和 `Cache-Control: public, max-age=60`，浏览器自动解压。实测域名将浏览器缓存 TTL 提升到 4 小时，因此网页按 UTC 分钟追加统一版本参数，同一分钟的访客共享相同 URL，避免浏览器继续使用数小时前的数据；CDN 对象本身使用 60 秒缓存。不会为每个访客产生随机参数。CORS 只允许本站和原 GitHub Pages origin 读取。
+
+上传入口只接受带专用令牌的 PUT，不提供公共数据读取。服务器没有 Cloudflare 管理凭证；上传 Worker 的 R2 binding 只指向本项目桶。此 Worker 正常每月调用约 4320 次；R2 写入约 4320 次。静态页面请求、Worker 请求与 R2 存储/操作额度是不同项目，不能混算；R2 超额仍可能计费。
+
+## 更新页面
+
+在服务器构建，或在已配置采集环境的维护电脑执行：
+
+```sh
+python3 build_pages.py --hosting Cloudflare --snapshot-url https://radar-data.viwo50when4.xyz/latest.json.gz --refresh-minutes 10
+npx wrangler@4.135.0 deploy
+```
+
+服务器没有维护电脑的 OAuth 登录。也可将服务器生成的 `dist/` 取回已登录 Cloudflare 的维护电脑，再执行部署命令。仅上传白名单静态产物。不要将仓库根目录设为 assets 目录。
+
+上传入口代码修改时独立部署：
+
+```sh
+node test-r2-upload.mjs
+npx wrangler@4.135.0 deploy --config deploy/r2-upload/wrangler.jsonc
+```
+
+`UPLOAD_TOKEN` 保存在 Worker secret 中，与服务器 root-only 环境文件中的专用令牌一致，不写入 wrangler 配置。
+
+## 状态与限制
+
+旧 GitHub 采集 Action 保持禁用，旧 GitHub Pages 不再同步刷新。服务器 timer 已改为 R2 数据更新，与页面部署完全独立。切换网站 origin 后浏览器 localStorage 不会自动迁移，因此原站保存的个人报价、黑名单需在新站重新设置。
+
+公网 CDN 承担访客流量，不等于无限免费或绝对不会中断。随机查询参数等缓存未命中仍可能增加 R2 读取；需要结合 Cloudflare 用量观察。采集服务器不作为公开页面或数据源站。
