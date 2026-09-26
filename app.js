@@ -10,6 +10,8 @@
   let snapshot = window.ROUTER_SNAPSHOT;
   const requestedModel = new URLSearchParams(location.search).get('model');
   let selectedModel = RouterRank.modelInfo(requestedModel) ? requestedModel : RouterRank.defaults.model;
+  let selectedSource = new URLSearchParams(location.search).get('source') || '';
+  const sourceLabels = ['官方', 'Codex Plus', 'Codex Pro', 'Codex 混合号池', 'Grok', 'Gemini', 'CC-Max', 'CC-Kiro', 'CC其它', '国产模型'];
   const activeSnapshot = () => RouterRank.selectSnapshot(snapshot, selectedModel);
   const modelLabel = () => RouterRank.modelInfo(selectedModel).label;
   $('model-select').innerHTML = RouterRank.models.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
@@ -18,10 +20,13 @@
     const info = RouterRank.modelInfo(selectedModel);
     document.querySelectorAll('[data-model-label]').forEach(el => { el.textContent = info.label; });
     document.querySelectorAll('[data-model-id]').forEach(el => { el.textContent = info.id; });
-    $('source-scope').textContent = info.source ? '仅 ' + info.source : '全部公开来源';
-    $('model-scope-title').textContent = `${info.source || '公开市场'} / ${info.label}`;
+    const sources = [...new Set([...sourceLabels, ...(activeSnapshot()?.rows || []).map(r => r.source), selectedSource].filter(Boolean))];
+    $('source-select').innerHTML = '<option value="">全部来源</option>' + sources.map(s => `<option value="${escape(s)}">${escape(s)}</option>`).join('');
+    $('source-select').value = selectedSource;
+    $('source-scope').textContent = selectedSource ? '仅 ' + selectedSource : '全部公开来源';
+    $('model-scope-title').textContent = `${selectedSource || '全部来源'} / ${info.label}`;
     const market = new URL('https://shu26.cfd/api/marketplace/groups');
-    market.search = new URLSearchParams({ model: info.id, page: '1', page_size: '20', ...(info.source ? { source: info.source } : {}) });
+    market.search = new URLSearchParams({ model: info.id, page: '1', page_size: '20', ...(selectedSource ? { source: selectedSource } : {}) });
     $('market-source').href = market.href;
     document.title = info.label + ' · 渠道雷达';
     labels.cost = info.label + ' 实扣';
@@ -67,7 +72,7 @@
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
-    return { model: selectedModel, weights, minMultiplier: filterNumber('min-multiplier'), minSamples: filterNumber('min-samples'), minSuccess: filterNumber('min-success'), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
+    return { model: selectedModel, source: selectedSource, weights, minMultiplier: filterNumber('min-multiplier'), minSamples: filterNumber('min-samples'), minSuccess: filterNumber('min-success'), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
   }
   function priceRows() {
     const data = activeSnapshot();
@@ -364,6 +369,14 @@
     readMinimumMultiplier(); page = 1; priceMessage = ''; render();
   });
   document.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => { activePreset = b.dataset.preset; setWeights(presetWeights[activePreset]); render(); }));
+  $('source-select').addEventListener('change', event => {
+    selectedSource = event.target.value; selected = null; page = 1; tab = 'all';
+    const url = new URL(location.href);
+    if (selectedSource) url.searchParams.set('source', selectedSource);
+    else url.searchParams.delete('source');
+    try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
+    render();
+  });
   $('model-select').addEventListener('change', event => {
     selectedModel = event.target.value; selected = null; page = 1; tab = 'all';
     const url = new URL(location.href);

@@ -6,7 +6,7 @@
 
 ## 两条独立路径
 
-1. 服务器每 10 分钟采集五个模型，通过带专用凭证的上传入口覆盖 R2 桶 `gpt6-route-radar-data` 的 `latest.json.gz`。每次只写一份数据，不构建或部署网站。
+1. 服务器每 10 分钟采集七个模型的全部来源，通过带专用凭证的上传入口覆盖 R2 桶 `gpt6-route-radar-data` 的 `latest.json.gz`。每次只写一份数据，不构建或部署网站。
 2. 网页每 60 秒请求同站 `/api/snapshot`。Pages Function 读取私有 R2 并解压 JSON，使用 60 秒共享缓存；忽略查询字符串，随机参数不会产生独立 R2 缓存键。
 
 `_routes.json` 只让 `/api/snapshot` 调用函数；HTML、JS、CSS 等静态请求不调用函数。数据端点计入 Pages Functions / Workers 请求额度，缓存减少 R2 读取，不能消除函数调用计数。R2 存储及操作额度单独计算，不能把它等同于页面构建额度或无限免费访问。

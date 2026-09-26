@@ -11,12 +11,13 @@ import urllib.request
 BASE = 'https://shu26.cfd'
 MODEL = 'gpt-6-astra'
 MODELS = {
-    MODEL: 'Codex Pro',
+    MODEL: None,
     'claude-opus-5': None,
+    'claude-opus-5-5': None,
     'claude-sonnet-5': None,
     'claude-fable-5-1': None,
-    'gpt-5.6-sol': 'Codex Pro',
-    'gpt-5.6-terra': 'Codex Pro',
+    'gpt-5.6-sol': None,
+    'gpt-5.6-terra': None,
 }
 MIN_MULTIPLIER = 0
 ROOT = Path(__file__).resolve().parent

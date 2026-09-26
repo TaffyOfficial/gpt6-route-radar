@@ -7,7 +7,7 @@ const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete:
 let tests = 0;
 function test(name, fn) { fn(); tests++; console.log('PASS', name); }
 test('exact source/model with low public quotes included', () => {
-  const r = rank(snap([make(), make({ id: 'b', multiplier: .199999 }), make({ id: 'c', source: 'Codex Plus' }), make({ id: 'd', model: 'gpt-5.6-sol' })]), {minMultiplier: .1}, now);
+  const r = rank(snap([make(), make({ id: 'b', multiplier: .199999 }), make({ id: 'c', source: 'Codex Plus' }), make({ id: 'd', model: 'gpt-5.6-sol' })]), {minMultiplier: .1, source: 'Codex Pro'}, now);
   assert.deepEqual(r.rows.map(r => r.id), ['b', 'a']);
 });
 test('zero/missing latency and missing cache never rank as free/fast', () => {
@@ -181,7 +181,8 @@ test('model selection isolates rankings, search, blacklist and exported IDs', ()
     [sol]: {...snap([make({id:'sol',model:sol}), make({id:'plus',model:sol,source:'Codex Plus'})]),model:sol}
   }};
   assert.deepEqual(rank(s,{model:opus},now).rows.map(r=>r.id),['cc']);
-  assert.deepEqual(rank(s,{model:sol},now).rows.map(r=>r.id),['sol']);
+  assert.deepEqual(rank(s,{model:sol},now).rows.map(r=>r.id),['plus','sol']);
+  assert.deepEqual(rank(s,{model:sol,source:'Codex Pro'},now).rows.map(r=>r.id),['sol']);
   assert.equal(rank(s,{},now).rows[0].id,'gpt');
   const p = plan(s,{model:opus},now);
   assert.equal(p.model,opus); assert.equal(p.source,null); assert.equal(p.channels[0].source,'CC-Max');
@@ -267,4 +268,24 @@ test('Terra selection uses its own metrics and never falls back to Astra channel
   assert.equal(plan(s,{model},now).model,model);
   assert.equal(rank(snap([make()]),{model},now).rows.length,0);
 });
+
+test('Opus 5.5 source selection applies to ranking, search and exported recommendations', () => {
+  const model = 'claude-opus-5-5';
+  const s = {...snap([]), modelSnapshots: {[model]: {...snap([
+    make({id:'max', model, source:'CC-Max'}),
+    make({id:'kiro', model, source:'CC-Kiro'}),
+    make({id:'official', model, source:'官方'})
+  ]), model}}};
+  assert.equal(rank(s, {model}, now).rows.length, 3);
+  const input = {model, source:'CC-Kiro'};
+  const r = rank(s, input, now);
+  assert.deepEqual(r.rows.map(row => row.id), ['kiro']);
+  const p = plan(s, input, now);
+  assert.equal(p.source, 'CC-Kiro');
+  assert.deepEqual(p.channels.map(row => row.group_id), ['kiro']);
+  assert.ok(search(s, r, 'test').outside.every(row => row.reasons.includes('不是 CC-Kiro 渠道')));
+  assert.equal(rank(s, {model, source:'Gemini'}, now).rows.length, 0);
+  assert.equal(rank(s, {...input, blockedKeys:['group:kiro']}, now).rows.length, 0);
+});
+
 console.log(`${tests} tests passed`);
