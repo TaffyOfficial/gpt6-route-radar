@@ -265,32 +265,43 @@ def check(client, row):
         return 'error', tests, str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
 
 def candidates(snapshot):
-    script = "const fs=require('fs');const R=require('./rank.js');const s=JSON.parse(fs.readFileSync(0,'utf8'));for(const r of s.rows)delete r.intelligence;process.stdout.write(JSON.stringify(R.rank(s,{source:'Codex Pro',model:'gpt-6-astra',freshnessProfile:'scheduled'}).eligible));"
+    script = "const fs=require('fs');const R=require('./rank.js');const s=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(R.rank(s,{source:'Codex Pro',model:'gpt-6-astra',freshnessProfile:'scheduled'}).rows));"
     run = subprocess.run(['node', '-e', script], cwd=ROOT, input=json.dumps(snapshot), text=True, encoding='utf-8', capture_output=True, check=True)
     return json.loads(run.stdout)
 
 def run_batch(snapshot, client, batch, state, persist=save_state, checker=check):
-    if state['batches'].get(batch, {}).get('completedAt'):
+    def ranked_rows():
+        for row in snapshot['rows']:
+            row['intelligence'] = state['channels'].get(key(row), {})
+        return [r for r in candidates(snapshot) if not state['channels'].get(key(r), {}).get('blacklist')]
+    def covered(row):
+        record = state['channels'].get(key(row), {})
+        return record.get('status') in ('normal', 'mild') and not record.get('lastError')
+    initial = ranked_rows()
+    if state['batches'].get(batch, {}).get('completedAt') and all(covered(r) for r in initial[:7]):
         return state
     rows = {key(r): r for r in snapshot['rows'] if r['source'] == SOURCE}
-    due = [rows[k] for k, v in state['channels'].items() if v.get('blacklist') == 'temporary' and k in rows]
-    ranked = candidates(snapshot)
-    queue = {key(r): r for r in [*due, *ranked]}
+    due = [r for k, r in rows.items() if state['channels'].get(k, {}).get('blacklist') == 'temporary' and state['channels'][k].get('batch') != batch]
     normal = sum(v.get('batch') == batch and v.get('status') == 'normal' and not v.get('lastError') for v in state['channels'].values())
-    pending = [(k, row) for k, row in queue.items() if state['channels'].get(k, {}).get('blacklist') != 'permanent' and state['channels'].get(k, {}).get('batch') != batch]
+    attempted = set()
     def waves():
         with ThreadPoolExecutor(max_workers=10) as pool:
-            for offset in range(0, len(pending), 10):
-                wave = [(k, r) for k, r in pending[offset:offset + 10] if normal < 8 or state['channels'].get(k, {}).get('blacklist') == 'temporary']
+            while True:
+                ranked = ranked_rows()
+                missing = [r for r in ranked[:7] if not covered(r)]
+                ordinary = [r for r in ranked if r.get('eligible', True)] if normal < 8 else []
+                queue = {key(r): r for r in [*missing, *ordinary, *due]}
+                wave = [(k, r) for k, r in queue.items() if k not in attempted and state['channels'].get(k, {}).get('blacklist') != 'permanent' and (state['channels'].get(k, {}).get('batch') != batch or state['channels'].get(k, {}).get('lastError'))][:10]
                 if not wave:
-                    continue
-                print(f'Starting wave: {len(wave)} channels; normal={normal}', flush=True)
+                    break
+                attempted.update(k for k, _ in wave)
+                print(f'Starting wave: {len(wave)} channels; normal={normal}; top7 pending={len(missing)}', flush=True)
                 futures = [(k, r, pool.submit(checker, client, r)) for k, r in wave]
                 for k, r, future in futures:
                     yield k, r, future.result()
     for k, row, checked in waves():
         previous = state['channels'].get(k, {})
-        if previous.get('blacklist') == 'permanent' or previous.get('batch') == batch:
+        if previous.get('blacklist') == 'permanent':
             continue
         outcome, tests, error = checked
         timestamp = now()
@@ -307,7 +318,12 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
                 log.write(json.dumps(event, ensure_ascii=False) + '\n')
         normal += outcome == 'normal'
         print(f"Channel {row.get('channelId')}: {outcome}", flush=True)
-    state['batches'][batch] = {'completedAt': now(), 'normal': normal, 'stopReason': 'normal_limit' if normal >= 8 else 'candidates_exhausted'}
+    top = ranked_rows()[:7]
+    missing = [str(r.get('channelId')) for r in top if not covered(r)]
+    state['batches'][batch] = {'finishedAt': now(), 'normal': normal, 'top7Covered': not missing, 'top7Pending': missing, 'stopReason': 'top7_incomplete' if missing else 'normal_limit' if normal >= 8 else 'candidates_exhausted'}
+    if not missing:
+        state['batches'][batch]['completedAt'] = now()
+    print('Top 7 coverage: ' + ('complete' if not missing else 'pending ' + ', '.join(missing)), flush=True)
     state['batches'] = dict(list(state['batches'].items())[-30:])
     persist(state)
     return state
@@ -321,9 +337,6 @@ def main():
         hk = datetime.now(timezone(timedelta(hours=8)))
         batch = hk.strftime('%Y-%m-%d') + ('T14' if hk.hour >= 14 else 'T08')
         state = load_state()
-        if state['batches'].get(batch, {}).get('completedAt'):
-            print('Batch already completed')
-            return
         config = rules()
         if len(config.get('questions', [])) != 2:
             raise ValueError('Invalid private question configuration')

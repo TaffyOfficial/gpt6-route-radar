@@ -46,11 +46,32 @@ class Checks(unittest.TestCase):
             return ('severe' if row['channelId'] == 0 else 'normal'), [], None
         with patch('intelligence.candidates', return_value=rows):
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 10)
+            self.assertEqual(len(calls), 11)
             self.assertNotIn(1, calls)
             self.assertEqual(state['channels']['channel:0']['blacklist'], 'permanent')
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 10)
-        self.assertEqual(state['batches']['batch1']['normal'], 9)
+            self.assertEqual(len(calls), 11)
+        self.assertEqual(state['batches']['batch1']['normal'], 10)
+
+class CoverageTests(unittest.TestCase):
+    def test_eight_normal_does_not_skip_untested_leaders(self):
+        rows = [{'id':str(i),'channelId':i,'name':str(i),'source':'Codex Pro'} for i in range(20)]
+        state = {'channels': {'channel:'+str(i):{'status':'normal','batch':'b'} for i in range(10,18)}, 'batches': {'b':{'completedAt':'old'}}}
+        calls=[]
+        def checker(client,row):
+            calls.append(row['channelId'])
+            return 'normal',[],None
+        with patch('intelligence.candidates',return_value=rows):
+            run_batch({'rows':rows},None,'b',state,persist=lambda s:None,checker=checker)
+        self.assertEqual(sorted(calls),list(range(7)))
+        self.assertTrue(state['batches']['b']['top7Covered'])
+
+    def test_errors_do_not_count_as_top_seven_coverage(self):
+        row={'id':'x','channelId':1,'name':'x','source':'Codex Pro'}
+        state={'channels':{},'batches':{}}
+        with patch('intelligence.candidates',return_value=[row]):
+            run_batch({'rows':[row]},None,'b',state,persist=lambda s:None,checker=lambda c,r:('error',[],'inference HTTP 429'))
+        self.assertFalse(state['batches']['b']['top7Covered'])
+        self.assertNotIn('completedAt',state['batches']['b'])
 
 if __name__ == '__main__': unittest.main()
