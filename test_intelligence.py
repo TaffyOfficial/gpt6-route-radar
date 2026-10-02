@@ -46,11 +46,11 @@ class Checks(unittest.TestCase):
             return ('severe' if row['channelId'] == 0 else 'normal'), [], None
         with patch('intelligence.candidates', return_value=rows):
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 9)
+            self.assertEqual(len(calls), 10)
             self.assertNotIn(1, calls)
             self.assertEqual(state['channels']['channel:0']['blacklist'], 'permanent')
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 9)
-        self.assertEqual(state['batches']['batch1']['normal'], 8)
+            self.assertEqual(len(calls), 10)
+        self.assertEqual(state['batches']['batch1']['normal'], 9)
 
 if __name__ == '__main__': unittest.main()

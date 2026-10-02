@@ -1,5 +1,7 @@
 """Scheduled, channel-bound CodeGo checks. Credentials never enter public snapshots."""
 import json
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import os
 import re
 import subprocess
@@ -105,6 +107,7 @@ class CodeGo:
                 return None
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(self.jar), NoRedirect())
         self.tokens = None
+        self.key_lock = threading.Lock()
         self.key_cache_path = STATE.with_name('codego-keys.json')
         self.key_cache = json.loads(self.key_cache_path.read_text()) if self.key_cache_path.exists() else {}
 
@@ -171,6 +174,10 @@ class CodeGo:
         temp.replace(self.key_cache_path)
 
     def channel_key(self, row):
+        with self.key_lock:
+            return self._channel_key(row)
+
+    def _channel_key(self, row):
         group = 'market:' + row['id'].removeprefix('market:')
         usable = [t for t in self.tokens if t.get('group') == group and t.get('status') == 1
                   and (t.get('expired_time', -1) == -1 or t['expired_time'] > time.time())
@@ -229,13 +236,22 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
     ranked = candidates(snapshot)
     queue = {key(r): r for r in [*due, *ranked]}
     normal = sum(v.get('batch') == batch and v.get('status') == 'normal' and not v.get('lastError') for v in state['channels'].values())
-    for k, row in queue.items():
+    pending = [(k, row) for k, row in queue.items() if state['channels'].get(k, {}).get('blacklist') != 'permanent' and state['channels'].get(k, {}).get('batch') != batch]
+    def waves():
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            for offset in range(0, len(pending), 10):
+                wave = [(k, r) for k, r in pending[offset:offset + 10] if normal < 8 or state['channels'].get(k, {}).get('blacklist') == 'temporary']
+                if not wave:
+                    continue
+                print(f'Starting wave: {len(wave)} channels; normal={normal}', flush=True)
+                futures = [(k, r, pool.submit(checker, client, r)) for k, r in wave]
+                for k, r, future in futures:
+                    yield k, r, future.result()
+    for k, row, checked in waves():
         previous = state['channels'].get(k, {})
         if previous.get('blacklist') == 'permanent' or previous.get('batch') == batch:
             continue
-        if normal >= 8 and previous.get('blacklist') != 'temporary':
-            continue
-        outcome, tests, error = checker(client, row)
+        outcome, tests, error = checked
         timestamp = now()
         record = transition(previous, outcome, timestamp)
         event = {'at': timestamp, 'batch': batch, 'groupId': row['id'], 'channelId': row.get('channelId'), 'model': MODEL, 'outcome': outcome, 'tests': tests}
@@ -267,6 +283,11 @@ def main():
         if state['batches'].get(batch, {}).get('completedAt'):
             print('Batch already completed')
             return
+        config = rules()
+        if len(config.get('questions', [])) != 2:
+            raise ValueError('Invalid private question configuration')
+        re.compile(config['firstPattern'])
+        re.compile(config['secondPattern'])
         snapshot = collect_all()
         client = CodeGo()
         client.login()
