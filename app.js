@@ -71,10 +71,10 @@
   const effectiveLabel = r => r.cache === 0 ? '∞' : format(r.effectiveMultiplier, 3);
   function intelligenceView(r) {
     const q = r.intelligence;
-    const status = q?.status || 'pending';
-    const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'待测试'}[status] || '待测试';
-    const label = q?.lastError ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
-    return `<div class="intelligence"><span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每日 08:00 / 14:00（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b></article>`).join('')}</details>` : ''}</div>`;
+    const status = q?.status || (q?.lastError ? 'error' : 'pending');
+    const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'尚未测试', error:'请求失败 · 待重试'}[status] || '尚未测试';
+    const label = q?.lastError && q?.status ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
+    return `<div class="intelligence"><span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每日 08:00 / 14:00（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
   }
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
@@ -278,10 +278,10 @@
     $('rec-state').textContent = result.stale ? '待刷新' : '满足门槛';
     $('rec-state').className = 'tag' + (result.stale || !result.eligible.length ? ' warning' : '');
     const testedRows = (activeSnapshot().rows || []).filter(r => r.source === 'Codex Pro');
-    $('intelligence-summary').innerHTML = [['normal','智力正常'],['mild','轻微降智'],['severe','严重降智']].map(([status,label]) => `<span class="intelligence-tag ${status}">${label} ${testedRows.filter(r => r.intelligence?.status === status).length}</span>`).join('') + `<span class="intelligence-note">历史最近结果 · 待测试 ${testedRows.filter(r => !r.intelligence?.status).length}</span>`;
+    $('intelligence-summary').innerHTML = [['normal','智力正常'],['mild','轻微降智'],['severe','严重降智']].map(([status,label]) => `<span class="intelligence-tag ${status}">${label} ${testedRows.filter(r => r.intelligence?.status === status).length}</span>`).join('') + `<span class="intelligence-note">历史最近结果 · 请求失败 ${testedRows.filter(r => !r.intelligence?.status && r.intelligence?.lastError).length} · 尚未测试 ${testedRows.filter(r => !r.intelligence?.status && !r.intelligence?.lastError).length}</span>`;
     const top = result.eligible[0];
     if (top) {
-      $('recommend-title').textContent = top.name + ' · ' + ({normal:'智力正常',mild:'轻微降智',severe:'严重降智'}[top.intelligence?.status] || '待测试');
+      $('recommend-title').textContent = top.name + ' · ' + ({normal:'智力正常',mild:'轻微降智',severe:'严重降智'}[top.intelligence?.status] || (top.intelligence?.lastError ? '请求失败 · 待重试' : '尚未测试'));
       $('recommend-copy').textContent = `综合 ${format(top.score)} 分 · ${top.priceSource === 'personal' ? '个人' : '公开'} ${top.multiplier}× · 缓存折算 ${effectiveLabel(top)}× · 首字 ${format(top.latency / 1000)}s · ${modelLabel()} 缓存 ${format(top.cache)}%`;
       $('route-chain').innerHTML = result.eligible.slice(0, 3).map((r, i) => `${i ? '<span class="route-arrow" aria-hidden="true">→</span>' : ''}<div class="route-item"><span>${['首选', '备用 1', '备用 2'][i]}</span><b>${escape(r.channelId)} 号渠道</b></div>`).join('');
     } else {

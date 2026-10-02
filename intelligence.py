@@ -37,6 +37,34 @@ def save_state(state):
     tmp.write_text(json.dumps(state, ensure_ascii=False), encoding='utf-8')
     tmp.replace(STATE)
 
+def public_error(message):
+    """Allowlisted explanations only; never publish provider response bodies."""
+    message = str(message)
+    stage = '模型调用' if message.startswith('inference') else '管理接口' if message.startswith('management:') else '请求'
+    if message.startswith('management:') and '/key' in message:
+        stage = '获取 Key'
+    elif message.startswith('management:') and '/token/' in message:
+        stage = '令牌管理'
+    elif message.startswith('management:') and '/login' in message:
+        stage = '账户登录'
+    code = re.search(r'HTTP (\d{3})', message)
+    if code:
+        labels = {'429': '被限流', '401': '认证失败', '403': '访问被拒绝', '402': '额度不足', '500': '服务内部错误', '502': '上游网关错误', '503': '服务暂不可用', '504': '网关超时'}
+        return stage + labels.get(code[1], '失败') + '（HTTP ' + code[1] + '）' + ('；旧日志未记录接口阶段' if stage == '请求' else '')
+    if 'Incomplete or empty model answer' in message:
+        return '模型回答为空或被截断，未进行智力判定'
+    if 'Timeout' in message or 'timed out' in message:
+        return stage + '超时'
+    if message == 'PermissionError':
+        return '测试服务读取私有配置权限不足，未调用模型'
+    if message == 'URLError':
+        return '网络连接失败'
+    if 'rejected request' in message:
+        return stage + '被平台拒绝，未取得有效回答'
+    if 'No usable channel-bound key' in message:
+        return '未取得可用的渠道专属 Key'
+    return '请求失败，未取得有效结果（详细原因仅保留在服务器）'
+
 def attach(snapshot):
     state = load_state()
     for data in [snapshot, *snapshot.get('modelSnapshots', {}).values()]:
@@ -45,9 +73,9 @@ def attach(snapshot):
             if record:
                 row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model') if k in record}
             if record:
-                row['intelligence']['history'] = [{k: h[k] for k in ('at', 'outcome') if k in h} for h in record.get('history', [])]
+                row['intelligence']['history'] = [{**{k: h[k] for k in ('at', 'outcome') if k in h}, **({'error': public_error(h['error'])} if h.get('error') else {})} for h in record.get('history', [])]
                 if record.get('lastError'):
-                    row['intelligence']['lastError'] = {'at': record['lastError']['at'], 'message': '请求异常，等待重试'}
+                    row['intelligence']['lastError'] = {'at': record['lastError']['at'], 'message': public_error(record['lastError']['message'])}
         data['intelligenceSchedule'] = {'timezone': 'Asia/Hong_Kong', 'hours': [8, 14], 'normalLimit': 8}
     return snapshot
 
@@ -114,7 +142,7 @@ class CodeGo:
                     raise RuntimeError(stage + ' HTTP 429; retry deferred') from None
                 time.sleep(max(1, delay))
         if result.get('success') is False or 'error' in result:
-            raise RuntimeError('CodeGo rejected request')
+            raise RuntimeError(stage + ' rejected request')
         return result
 
     def login(self):
