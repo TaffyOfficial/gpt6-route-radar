@@ -1,6 +1,6 @@
 # Additional Vercel address
 
-Production: https://route-radar-sandy.vercel.app/
+Production: https://codego-radar.vercel.app/
 
 Deploy this directory as a Vercel project with no framework or build command.
 The public directory contains the same allowlisted frontend build as Pages.
