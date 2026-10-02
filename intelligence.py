@@ -19,6 +19,9 @@ ROOT = Path(__file__).resolve().parent
 STATE = Path(os.environ.get('RADAR_INTELLIGENCE_STATE', '/var/lib/gpt6-route-radar/intelligence.json'))
 RULES = Path(os.environ.get('RADAR_INTELLIGENCE_RULES', '/etc/gpt6-route-radar/intelligence-rules.json'))
 
+class ProtocolUnavailable(RuntimeError):
+    pass
+
 def rules():
     return json.loads(RULES.read_text('utf-8'))
 
@@ -42,6 +45,8 @@ def save_state(state):
 def public_error(message):
     """Allowlisted explanations only; never publish provider response bodies."""
     message = str(message)
+    if message == 'inference protocol unavailable':
+        return '该渠道不支持请求的模型 API 协议'
     stage = '模型调用' if message.startswith('inference') else '管理接口' if message.startswith('management:') else '请求'
     if message.startswith('management:') and '/key' in message:
         stage = '获取 Key'
@@ -122,14 +127,40 @@ class CodeGo:
         for attempt in range(3):
             try:
                 with self.opener.open(req, timeout=180) as response:
-                    result = json.load(response)
+                    if '/v1/responses' == path and 'text/event-stream' in response.headers.get('Content-Type', ''):
+                        result = None
+                        for line in response:
+                            if not line.startswith(b'data:'):
+                                continue
+                            payload = line[5:].strip()
+                            if payload == b'[DONE]':
+                                break
+                            event = json.loads(payload)
+                            if event.get('type') in ('response.completed', 'response.incomplete', 'response.failed'):
+                                result = event.get('response', {})
+                                break
+                            if event.get('type') == 'error':
+                                raise RuntimeError('inference rejected request')
+                        if result is None:
+                            raise RuntimeError('Incomplete or empty model answer')
+                    else:
+                        result = json.load(response)
                 break
             except urllib.error.HTTPError as exc:
                 # Preserve the failing API stage without persisting response bodies,
                 # which may contain upstream addresses or account information.
                 retry_after = exc.headers.get('Retry-After', '') if exc.headers else ''
                 status = exc.code
+                protocol_unavailable = False
+                if status == 400 and bearer:
+                    try:
+                        body = json.loads(exc.read(16384))
+                        protocol_unavailable = body.get('error', {}).get('code') == 'gateway_provider_protocol_unavailable'
+                    except (ValueError, AttributeError):
+                        pass
                 exc.close()
+                if protocol_unavailable:
+                    raise ProtocolUnavailable('inference protocol unavailable') from None
                 if status != 429 or attempt == 2:
                     raise RuntimeError(stage + ' HTTP ' + str(status)) from None
                 try:
@@ -144,7 +175,7 @@ class CodeGo:
                 if delay > 60:
                     raise RuntimeError(stage + ' HTTP 429; retry deferred') from None
                 time.sleep(max(1, delay))
-        if result.get('success') is False or 'error' in result:
+        if result.get('success') is False or result.get('error') is not None:
             raise RuntimeError(stage + ' rejected request')
         return result
 
@@ -200,7 +231,17 @@ class CodeGo:
         return token if token.startswith('sk-') else 'sk-' + token
 
     def answer(self, token, question):
-        result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': rules()['questions'][question - 1]}], 'stream': False, 'max_completion_tokens': 4096}, bearer=token)
+        prompt = rules()['questions'][question - 1]
+        try:
+            result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False, 'max_completion_tokens': 4096}, bearer=token)
+        except ProtocolUnavailable:
+            # Only an explicit protocol rejection permits another request.
+            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'stream': False, 'max_output_tokens': 4096}, bearer=token)
+            messages = [item for item in result.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
+            answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
+            if result.get('status') != 'completed' or any(item.get('status') not in (None, 'completed') for item in messages) or not answer.strip():
+                raise RuntimeError('Incomplete or empty model answer')
+            return answer, result.get('usage', {}), result.get('model')
         choice = result.get('choices', [{}])[0]
         answer = choice.get('message', {}).get('content')
         if not isinstance(answer, str) or not answer.strip() or choice.get('finish_reason') not in ('stop', 'end_turn'):

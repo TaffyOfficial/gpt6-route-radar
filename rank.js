@@ -123,18 +123,20 @@
     for (const r of rows) {
       r.components = {
         price: finite(r.multiplier) && r.multiplier >= 0 ? 100 * clamp(priceReferenceMultiplier / r.multiplier, 0, 1) : 0,
-        effective: r.effectiveMultiplier != null ? 100 * clamp(priceReferenceMultiplier / r.effectiveMultiplier, 0, 1) : 0,
+        effective: r.effectiveMultiplier != null ? 100 / (1 + (r.effectiveMultiplier / priceReferenceMultiplier) ** 2) : 0,
         ttft: finite(r.latency) && r.latency > 0 ? 100 / (1 + r.latency / 10000) : 0,
         cache: finite(r.cache) ? clamp(r.cache, 0, 100) : 0,
         cost: costMin && finite(r.historicalCost) && r.historicalCost > 0 ? 100 * clamp(costMin / r.historicalCost, 0, 1) : 0
       };
       r.contributions = Object.fromEntries(Object.keys(c.weights).map(k => [k, c.weights[k] * r.components[k]]));
       r.baseScore = clamp(Object.values(r.contributions).reduce((a, b) => a + b, 0), 0, 100);
-      // Fixed bands keep every recommendation above observation rows, independent of other channels.
+      // Apply the quality discount after the eligibility bands; eligibility remains independent of score.
       const scoreScale = r.eligible ? .5 : .49;
       const gateScore = r.eligible ? 50 : 0;
-      r.score = gateScore + r.baseScore * scoreScale;
-      r.scoreContributions = { gate: gateScore, ...Object.fromEntries(Object.entries(r.contributions).map(([k, v]) => [k, v * scoreScale])) };
+      r.preIntelligenceScore = gateScore + r.baseScore * scoreScale;
+      r.intelligenceFactor = r.intelligence?.status === 'mild' ? .7 : 1;
+      r.score = r.preIntelligenceScore * r.intelligenceFactor;
+      r.scoreContributions = { gate: gateScore * r.intelligenceFactor, ...Object.fromEntries(Object.entries(r.contributions).map(([k, v]) => [k, v * scoreScale * r.intelligenceFactor])) };
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
     rows.forEach((r, i) => { r.overallRank = i + 1; });
@@ -174,7 +176,7 @@
     if (result.stale) throw Error(result.config.freshnessProfile === 'scheduled' ? '线上快照超过 20 分钟或不完整，请刷新或等待下次采集' : '行情超过 10 分钟、成功率超过 3 分钟或数据不完整，请先刷新');
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
     const { priceOverrides, ...scoring } = result.config;
-    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: result.config.source || null, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'eligibility_bands_v1', priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
+    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: result.config.source || null, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'smooth_price_quality_v2', effectivePriceFormula: '100/(1+(P/0.20)^2)', mildFactor: .7, bandsBeforeQualityDiscount: true, priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3), intelligenceFactor: r.intelligenceFactor, preIntelligenceScore: +r.preIntelligenceScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
   return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, sortRows, matchesQuery, search };
 });

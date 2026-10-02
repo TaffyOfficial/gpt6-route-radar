@@ -69,12 +69,13 @@ test('even the best observation score stays below the weakest eligible channel',
 test('fixed bands retain weighted base score, ordering and exact score-bar contributions', () => {
   const r = rank(snap([make(), make({ id: 'b', multiplier: .44, ttftAvg: 20000 }), make({ id: 'c', modelStatus: 'failed' })]), {}, now);
   assert.deepEqual(r.rows.map(row => row.id), ['a', 'b', 'c']);
-  assert.equal(r.rows[0].baseScore, 73.5); assert.equal(r.rows[0].score, 86.75);
+  const expected = 60 / (1 + (1 / .85) ** 2) + 17.5 + 5;
+  assert.ok(Math.abs(r.rows[0].baseScore - expected) < 1e-10); assert.equal(r.rows[0].score, 50 + expected * .5);
   assert.equal(r.rows[2].score, r.rows[2].baseScore * .49);
   for (const row of r.rows) assert.ok(Math.abs(Object.values(row.scoreContributions).reduce((a, b) => a + b, 0) - row.score) < 1e-10);
   const p = plan(snap([make()]), {}, now);
-  assert.equal(p.scoring.method, 'eligibility_bands_v1');
-  assert.equal(p.channels[0].baseScore, 73.5); assert.equal(p.channels[0].score, 86.75);
+  assert.equal(p.scoring.method, 'smooth_price_quality_v2');
+  assert.equal(p.channels[0].baseScore, +expected.toFixed(3)); assert.equal(p.channels[0].score, +(50 + expected * .5).toFixed(3));
 });
 test('observation bands stay fixed when other channels or recommendation filters change', () => {
   const observation = make({ id: 'watch', modelStatus: 'failed', historicalCost: null });
@@ -215,7 +216,7 @@ test('cache-adjusted multiplier uses fractional hit rate and changes ranking wit
   assert.equal(r.rows[0].id,'better');
   assert.ok(Math.abs(r.rows[0].effectiveMultiplier-1/3)<1e-12);
   assert.equal(r.rows[1].effectiveMultiplier,.5);
-  assert.equal(r.rows[1].components.effective,40);
+  assert.equal(r.rows[1].components.effective,100 / 7.25);
   assert.equal(rank(s,{weights:{price:100,ttft:0,cache:0,effective:0,cost:0}},now).rows[0].id,'cheap-low-cache');
   assert.equal(rank(snap([make({cache:80})]),{},now).rows[0].effectiveMultiplier,.25);
   const p = plan(s,input,now);

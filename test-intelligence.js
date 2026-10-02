@@ -10,3 +10,11 @@ assert.match(R.search(snapshot,r,'2').outside[0].reasons.join(),/严重降智/);
 assert.equal(R.defaults.source,'Codex Pro');
 assert.deepEqual(R.plan(snapshot).channels.map(r=>r.channel_id), ['4','5','3']);
 console.log('PASS intelligence recommendation, search and export');
+
+const mild = r.rows.find(x=>x.id==='3');
+assert.ok(Math.abs(mild.score - mild.preIntelligenceScore * .7)<1e-9);
+assert.ok(Math.abs(Object.values(mild.scoreContributions).reduce((a,b)=>a+b,0)-mild.score)<1e-9);
+assert.equal(R.plan(snapshot).channels.find(x=>x.channel_id==='3').intelligenceFactor,.7);
+const curve = R.rank({...snapshot,rows:[{...row('a'),multiplier:.1,cache:100},{...row('b'),multiplier:.2,cache:100},{...row('c'),multiplier:.4,cache:100}]}).rows;
+assert.deepEqual(curve.map(x=>x.components.effective),[80,50,20]);
+console.log('PASS smooth price anchors and quality discount consistency');
