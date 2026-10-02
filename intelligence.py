@@ -7,6 +7,7 @@ import time
 import urllib.request
 import urllib.error
 import http.cookiejar
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -14,11 +15,10 @@ MODEL = 'gpt-6-astra'
 SOURCE = 'Codex Pro'
 ROOT = Path(__file__).resolve().parent
 STATE = Path(os.environ.get('RADAR_INTELLIGENCE_STATE', '/var/lib/gpt6-route-radar/intelligence.json'))
-Q1 = "don't search the internet, do you know Thibault Sottiaux on X. answer yes or no"
-Q2 = """在一个黑色的袋子里放有三种口味的糖果，每种糖果有两种不同的形状（圆形和五角星形，不同的形状靠手感可以分辨）。现已知不同口味的糖和不同形状的数量统计如下表。参赛者需要在活动前决定摸出的糖果数目，那么，最少取出多少个糖果才能保证手中同时拥有不同形状的苹果味和桃子味的糖？（同时手中有圆形苹果味匹配五角星桃子味糖果，或者有圆形桃子味匹配五角星苹果味糖果都满足要求）
-          苹果味 桃子味 西瓜味
-圆形        7      9      8
-五角星形    7      6      4"""
+RULES = Path(os.environ.get('RADAR_INTELLIGENCE_RULES', '/etc/gpt6-route-radar/intelligence-rules.json'))
+
+def rules():
+    return json.loads(RULES.read_text('utf-8'))
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -43,14 +43,19 @@ def attach(snapshot):
         for row in [*data.get('rows', []), *data.get('lookupRows', [])]:
             record = state['channels'].get(key(row))
             if record:
-                row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model', 'history', 'lastError') if k in record}
+                row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model') if k in record}
+            if record:
+                row['intelligence']['history'] = [{k: h[k] for k in ('at', 'outcome') if k in h} for h in record.get('history', [])]
+                if record.get('lastError'):
+                    row['intelligence']['lastError'] = {'at': record['lastError']['at'], 'message': '请求异常，等待重试'}
         data['intelligenceSchedule'] = {'timezone': 'Asia/Hong_Kong', 'hours': [8, 14], 'normalLimit': 8}
     return snapshot
 
 def passed(question, answer):
+    config = rules()
     if question == 1:
-        return bool(re.fullmatch(r'yes[.!。！]?', answer.strip(), re.IGNORECASE))
-    return bool(re.search(r'(?<![\d.])21(?!\d|\.\d)', answer))
+        return bool(re.fullmatch(config['firstPattern'], answer.strip(), re.IGNORECASE))
+    return bool(re.search(config['secondPattern'], answer))
 
 def transition(previous, outcome, timestamp):
     result = dict(previous)
@@ -72,6 +77,8 @@ class CodeGo:
                 return None
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(self.jar), NoRedirect())
         self.tokens = None
+        self.key_cache_path = STATE.with_name('codego-keys.json')
+        self.key_cache = json.loads(self.key_cache_path.read_text()) if self.key_cache_path.exists() else {}
 
     def api(self, path, data=None, bearer=None):
         headers = {'User-Agent': 'Mozilla/5.0', 'Content-Type': 'application/json'}
@@ -80,11 +87,32 @@ class CodeGo:
         elif self.uid:
             headers['New-Api-User'] = str(self.uid)
         req = urllib.request.Request(self.base + path, data=None if data is None else json.dumps(data).encode(), headers=headers)
-        try:
-            with self.opener.open(req, timeout=180) as response:
-                result = json.load(response)
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError('CodeGo HTTP ' + str(exc.code)) from None
+        stage = 'inference' if bearer else 'management:' + re.sub(r'/\d+/', '/:id/', path.split('?')[0])
+        for attempt in range(3):
+            try:
+                with self.opener.open(req, timeout=180) as response:
+                    result = json.load(response)
+                break
+            except urllib.error.HTTPError as exc:
+                # Preserve the failing API stage without persisting response bodies,
+                # which may contain upstream addresses or account information.
+                retry_after = exc.headers.get('Retry-After', '') if exc.headers else ''
+                status = exc.code
+                exc.close()
+                if status != 429 or attempt == 2:
+                    raise RuntimeError(stage + ' HTTP ' + str(status)) from None
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    try:
+                        delay = (parsedate_to_datetime(retry_after) - datetime.now(timezone.utc)).total_seconds()
+                    except (ValueError, TypeError, OverflowError):
+                        delay = 2 ** (attempt + 1)
+                # A very long server backoff is deferred to the next run instead
+                # of holding the batch indefinitely or retrying prematurely.
+                if delay > 60:
+                    raise RuntimeError(stage + ' HTTP 429; retry deferred') from None
+                time.sleep(max(1, delay))
         if result.get('success') is False or 'error' in result:
             raise RuntimeError('CodeGo rejected request')
         return result
@@ -104,6 +132,15 @@ class CodeGo:
                 break
             page += 1
         self.tokens = tokens
+        missing = [t['id'] for t in tokens if t.get('status') == 1 and str(t['id']) not in self.key_cache]
+        for offset in range(0, len(missing), 100):
+            found = self.api('/api/token/batch/keys', {'ids': missing[offset:offset+100]})['data']['keys']
+            self.key_cache.update({str(k): v for k, v in found.items()})
+        self.key_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = self.key_cache_path.with_suffix('.tmp')
+        temp.write_text(json.dumps(self.key_cache))
+        temp.chmod(0o600)
+        temp.replace(self.key_cache_path)
 
     def channel_key(self, row):
         group = 'market:' + row['id'].removeprefix('market:')
@@ -121,14 +158,14 @@ class CodeGo:
         if not usable:
             raise RuntimeError('No usable channel-bound key')
         item = usable[0]
-        data = self.api(f"/api/token/{item['id']}/key", {})['data']
+        data = self.key_cache[str(item['id'])]
         token = data.get('key') if isinstance(data, dict) else data
         if not isinstance(token, str) or not token:
             raise RuntimeError('Key response invalid')
         return token if token.startswith('sk-') else 'sk-' + token
 
     def answer(self, token, question):
-        result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': Q1 if question == 1 else Q2}], 'stream': False, 'max_completion_tokens': 4096}, bearer=token)
+        result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': rules()['questions'][question - 1]}], 'stream': False, 'max_completion_tokens': 4096}, bearer=token)
         choice = result.get('choices', [{}])[0]
         answer = choice.get('message', {}).get('content')
         if not isinstance(answer, str) or not answer.strip() or choice.get('finish_reason') not in ('stop', 'end_turn'):

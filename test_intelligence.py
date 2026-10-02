@@ -3,15 +3,16 @@ from unittest.mock import patch
 from intelligence import passed, transition, check, run_batch
 
 class Checks(unittest.TestCase):
+    def setUp(self):
+        self.rule_patch = patch('intelligence.rules', return_value={'firstPattern': 'mock-pass', 'secondPattern': 'mock-backup'})
+        self.rule_patch.start()
+        self.addCleanup(self.rule_patch.stop)
+
     def test_answers(self):
-        for answer in ['yes', ' YES. ', 'Yes!']:
-            self.assertTrue(passed(1, answer))
-        for answer in ['no', 'yesterday', 'yes or no', '']:
-            self.assertFalse(passed(1, answer))
-        self.assertTrue(passed(2, '最少 21 个'))
-        self.assertTrue(passed(2, 'The answer is 21.'))
-        self.assertFalse(passed(2, '121'))
-        self.assertFalse(passed(2, '21.5'))
+        self.assertTrue(passed(1, ' MOCK-PASS '))
+        self.assertFalse(passed(1, 'other'))
+        self.assertTrue(passed(2, 'result: mock-backup'))
+        self.assertFalse(passed(2, 'other'))
 
     def test_blacklist_recovery_and_errors(self):
         first = transition({}, 'severe', 't1')
@@ -29,7 +30,7 @@ class Checks(unittest.TestCase):
             def channel_key(self, row): return 'private'
             def answer(self, token, question):
                 self.calls.append(question)
-                return 'Yes', {}, 'gpt-6-astra'
+                return 'mock-pass', {}, 'gpt-6-astra'
         c = Client()
         self.assertEqual(check(c, {})[0], 'normal')
         self.assertEqual(c.calls, [1])
