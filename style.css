@@ -27,3 +27,16 @@
 .effective{background:#a185b4}
 
 .sort-button{border:0;background:transparent;color:inherit;padding:5px 0;min-height:30px;font:inherit;text-align:inherit;white-space:nowrap}.sort-button:hover{color:var(--green)}.sort-arrow{display:inline-block;min-width:18px;color:#83968a;font-size:12px;margin-left:3px}th[aria-sort=ascending] .sort-button,th[aria-sort=descending] .sort-button,th[aria-sort=ascending] .sort-arrow,th[aria-sort=descending] .sort-arrow{color:var(--green);font-weight:650}
+
+/* Compact instrument-panel status; text carries meaning in addition to color. */
+.intelligence{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0;font-size:12px;max-width:520px}
+.intelligence-tag{display:inline-flex;align-items:center;border:1px solid #bdc6d0;border-radius:5px;padding:3px 7px;background:#f1f4f6;color:#52606e;font-weight:650;white-space:nowrap}
+.intelligence-tag.normal{color:#146442;background:#eaf7ef;border-color:#b5dfc6}
+.intelligence-tag.mild{color:#8c560d;background:#fff4dc;border-color:#eacd8b}
+.intelligence-tag.severe{color:#a52d37;background:#fff0f0;border-color:#e7b6bc}
+.intelligence-note{color:#667383;font-size:11px}
+.intelligence-log{width:100%;font-weight:400;white-space:normal}.intelligence-log summary{cursor:pointer;color:#53697f;width:fit-content;padding:3px 0}
+.intelligence-log[open]{background:#f6f8fa;border:1px solid #dce3ea;border-radius:7px;padding:10px}.intelligence-log p{font-size:12px;line-height:1.7;margin:6px 0}
+.intelligence-log article{border-top:1px solid #dce3ea;padding:10px 0}.intelligence-log pre{font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto;color:#354355}
+
+.intelligence-overview{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:18px 22px;margin:16px 0 24px;border:1px solid #d6e0dc;border-left:4px solid #327256;border-radius:8px;background:#f8fbf9}.intelligence-overview strong{font-size:15px}.intelligence-overview p{font-size:12px;color:#65766c;margin:6px 0 0}.intelligence-overview small{flex-basis:100%;font-size:12px;color:#65766c}#intelligence-summary{display:flex;gap:8px;align-items:center;flex-wrap:wrap}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Twice daily channel checks at 08:00 and 14:00 Hong Kong
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 Asia/Hong_Kong
+OnCalendar=*-*-* 14:00:00 Asia/Hong_Kong
+Persistent=true
+AccuracySec=1min
+Unit=gpt6-route-radar-intelligence.service
+
+[Install]
+WantedBy=timers.target

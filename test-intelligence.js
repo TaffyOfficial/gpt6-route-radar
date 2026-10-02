@@ -1,0 +1,12 @@
+const assert = require('assert/strict');
+const R = require('./rank.js');
+const row = (id, status, blacklist) => ({id, channelId:id,name:'channel '+id,source:'Codex Pro',model:'gpt-6-astra',multiplier:.2,verified:true,lifecycle:'active',modelStatus:'healthy',cache:80,ttftAvg:1000,ttftSamples:10,intelligence:{status,blacklist}});
+const snapshot = {model:'gpt-6-astra',rows:[row('1','severe','temporary'),row('2','severe','permanent'),row('3','mild'),row('4','normal'),row('5')],complete:true,capturedAt:new Date().toISOString()};
+const r = R.rank(snapshot);
+assert.deepEqual(r.eligible.map(r=>r.id), ['4','5','3']);
+assert.deepEqual(r.blocked.map(r=>r.id), ['1','2']);
+assert.equal(R.search(snapshot,r,'2').outside[0].intelligence.blacklist,'permanent');
+assert.match(R.search(snapshot,r,'2').outside[0].reasons.join(),/严重降智/);
+assert.equal(R.defaults.source,'Codex Pro');
+assert.deepEqual(R.plan(snapshot).channels.map(r=>r.channel_id), ['4','5','3']);
+console.log('PASS intelligence recommendation, search and export');

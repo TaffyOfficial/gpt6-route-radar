@@ -18,7 +18,7 @@
     if ((snapshot.model || defaults.model) === model) return snapshot;
     return snapshot.modelSnapshots?.[model] || { ...snapshot, model, source: modelInfo(model)?.source, rows: [], lookupRows: [], count: 0, complete: false, modelSnapshots: undefined };
   }
-  const defaults = { model: 'gpt-6-astra', source: '', minMultiplier: 0, minSamples: 0, minSuccess: 0, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
+  const defaults = { model: 'gpt-6-astra', source: 'Codex Pro', minMultiplier: 0, minSamples: 0, minSuccess: 0, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
   const priceReferenceMultiplier = .20;
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -100,7 +100,7 @@
     const candidates = new Map([...(snapshot.lookupRows || []), ...snapshot.rows].map(r => [r.id, r]));
     const inScope = [...candidates.values()].filter(r => (!c.source || r.source === c.source) && r.model === c.model &&
       (c.minMultiplier === 0 || (finite(r.multiplier) && r.multiplier >= c.minMultiplier)));
-    const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
+    const isBlocked = r => ['temporary', 'permanent'].includes(r.intelligence?.blacklist) || blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
     const blocked = inScope.filter(isBlocked);
     // Personal prices affect scoring, while model scope and blacklist stay unchanged.
     const matches = inScope.filter(r => !isBlocked(r)).map(r => prices.apply(r, c.priceOverrides));
@@ -138,7 +138,7 @@
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
     rows.forEach((r, i) => { r.overallRank = i + 1; });
-    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible), excluded: rows.filter(r => !r.eligible) };
+    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible).sort((a, b) => ({normal: 0, mild: 2}[a.intelligence?.status] ?? 1) - ({normal: 0, mild: 2}[b.intelligence?.status] ?? 1) || b.score - a.score), excluded: rows.filter(r => !r.eligible) };
   }
   function matchesQuery(row, query) {
     const q = String(query || '').trim().toLowerCase();
@@ -157,6 +157,7 @@
     const outside = [...candidates.values()].filter(r => !ranked.has(r.id) && matchesQuery(r, query)).map(r => {
       const reasons = [];
       const blockKey = blocked.has('channel:' + r.channelId) ? 'channel:' + r.channelId : blocked.has('group:' + r.id) ? 'group:' + r.id : null;
+      if (r.intelligence?.blacklist) reasons.push('严重降智 · ' + (r.intelligence.blacklist === 'permanent' ? '永久拉黑' : '已拉黑，等待复测'));
       if (blockKey) reasons.push('已被你拉黑');
       if (!finite(r.multiplier)) reasons.push('缺少倍率');
       else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于你设置的 ${result.config.minMultiplier}×`);

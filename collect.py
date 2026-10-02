@@ -141,7 +141,8 @@ def collect_all():
     shared['capturedAt'] = captured_at
     snapshots = {model: collect(model, shared) for model in MODELS}
     default = snapshots.pop(MODEL)
-    return {**default, 'modelSnapshots': snapshots}
+    from intelligence import attach
+    return attach({**default, 'modelSnapshots': snapshots})
 
 
 def save(snapshot):

@@ -180,13 +180,13 @@ test('model selection isolates rankings, search, blacklist and exported IDs', ()
     [opus]: {...snap([make({id:'cc',model:opus,source:'CC-Max'})]),model:opus},
     [sol]: {...snap([make({id:'sol',model:sol}), make({id:'plus',model:sol,source:'Codex Plus'})]),model:sol}
   }};
-  assert.deepEqual(rank(s,{model:opus},now).rows.map(r=>r.id),['cc']);
-  assert.deepEqual(rank(s,{model:sol},now).rows.map(r=>r.id),['plus','sol']);
+  assert.deepEqual(rank(s,{model:opus,source:''},now).rows.map(r=>r.id),['cc']);
+  assert.deepEqual(rank(s,{model:sol,source:''},now).rows.map(r=>r.id),['plus','sol']);
   assert.deepEqual(rank(s,{model:sol,source:'Codex Pro'},now).rows.map(r=>r.id),['sol']);
   assert.equal(rank(s,{},now).rows[0].id,'gpt');
-  const p = plan(s,{model:opus},now);
+  const p = plan(s,{model:opus,source:''},now);
   assert.equal(p.model,opus); assert.equal(p.source,null); assert.equal(p.channels[0].source,'CC-Max');
-  assert.equal(search(s,rank(s,{model:opus},now),'test').outside.length,0);
+  assert.equal(search(s,rank(s,{model:opus,source:''},now),'test').outside.length,0);
   assert.equal(rank(s,{model:opus,blockedKeys:['group:cc']},now).rows.length,0);
   assert.equal(rank(s,{model:'claude-sonnet-5'},now).rows.length,0);
   assert.throws(()=>plan(s,{model:'claude-sonnet-5'},now),/刷新/);
@@ -206,7 +206,7 @@ test('live refresh updates each model without borrowing another model metrics', 
   assert.equal(updated.modelSnapshots[opus].rows[0].cache,10);
   assert.equal(updated.modelSnapshots[fable].rows[0].success,null);
   assert.equal(updated.modelSnapshots[fable].rows[0].modelRequests,0);
-  assert.equal(rank(updated,{model:opus},now+1000).eligible.length,0);
+  assert.equal(rank(updated,{model:opus,source:''},now+1000).eligible.length,0);
 });
 test('cache-adjusted multiplier uses fractional hit rate and changes ranking with its weight', () => {
   const s = snap([make({id:'cheap-low-cache',multiplier:.2,cache:40}), make({id:'better',multiplier:.3,cache:90})]);
@@ -234,9 +234,9 @@ test('zero or invalid cache never gains adjusted-price points or nonfinite expor
 test('live cache updates and model selection recalculate adjusted multipliers', () => {
   const model='claude-opus-5';
   const s={...snap([make({cache:80})]),modelSnapshots:{[model]:{...snap([make({model,source:'CC-Max',cache:40})]),model}}};
-  assert.equal(rank(s,{model},now).rows[0].effectiveMultiplier,.5);
+  assert.equal(rank(s,{model,source:''},now).rows[0].effectiveMultiplier,.5);
   const updated=applyStatus(s,{capturedAt:new Date(now+1000).toISOString(),data:[{group_id:'a',models:[{model,cache_hit_rate:50}]}]});
-  assert.equal(rank(updated,{model},now+1000).rows[0].effectiveMultiplier,.4);
+  assert.equal(rank(updated,{model,source:''},now+1000).rows[0].effectiveMultiplier,.4);
   assert.equal(rank(updated,{},now+1000).rows[0].effectiveMultiplier,null);
 });
 test('column sorting orders the full result before pagination without changing score ranks', () => {
@@ -261,12 +261,12 @@ test('missing column values stay last in either direction and equal values keep 
 test('Terra selection uses its own metrics and never falls back to Astra channels', () => {
   const model='gpt-5.6-terra';
   const s={...snap([make()]),modelSnapshots:{[model]:{...snap([make({id:'terra',model,success:72,cache:40}),make({id:'wrong',model:'gpt-6-astra'})]),model}}};
-  const result=rank(s,{model},now);
+  const result=rank(s,{model,source:''},now);
   assert.deepEqual(result.rows.map(r=>r.id),['terra']);
   assert.equal(result.rows[0].success,72);
   assert.equal(result.rows[0].cache,40);
-  assert.equal(plan(s,{model},now).model,model);
-  assert.equal(rank(snap([make()]),{model},now).rows.length,0);
+  assert.equal(plan(s,{model,source:''},now).model,model);
+  assert.equal(rank(snap([make()]),{model,source:''},now).rows.length,0);
 });
 
 test('Opus 5.5 source selection applies to ranking, search and exported recommendations', () => {
@@ -276,7 +276,7 @@ test('Opus 5.5 source selection applies to ranking, search and exported recommen
     make({id:'kiro', model, source:'CC-Kiro'}),
     make({id:'official', model, source:'官方'})
   ]), model}}};
-  assert.equal(rank(s, {model}, now).rows.length, 3);
+  assert.equal(rank(s, {model,source:''}, now).rows.length, 3);
   const input = {model, source:'CC-Kiro'};
   const r = rank(s, input, now);
   assert.deepEqual(r.rows.map(row => row.id), ['kiro']);

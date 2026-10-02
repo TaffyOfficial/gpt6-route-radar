@@ -1,0 +1,21 @@
+[Unit]
+Description=Test recommended GPT6 Astra Pro channels
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=route-radar
+Group=route-radar
+EnvironmentFile=/etc/gpt6-route-radar/codego.env
+ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/intelligence.py
+ExecStartPost=/usr/bin/python3 /opt/gpt6-route-radar/publish_r2.py
+EnvironmentFile=/etc/gpt6-route-radar/r2-upload.env
+StateDirectory=gpt6-route-radar
+UMask=0077
+TimeoutStartSec=4h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

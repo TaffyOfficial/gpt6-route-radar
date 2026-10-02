@@ -21,15 +21,16 @@
     </header>
     <main>
       <div class="intro">
-        <div><div class="eyebrow"><span id="model-scope-title">全部来源 / GPT6 Astra</span></div><h1>把每一条请求，<br class="mobile-break">交给合适的渠道。</h1><p>价格、首字延迟、缓存一起看。<span data-model-label>GPT6 Astra</span> 历史实扣只作辅助。</p></div>
+        <div><div class="eyebrow"><span id="model-scope-title">Codex Pro / GPT6 Astra</span></div><h1>把每一条请求，<br class="mobile-break">交给合适的渠道。</h1><p>价格、首字延迟、缓存一起看。<span data-model-label>GPT6 Astra</span> 历史实扣只作辅助。</p></div>
         <div class="refresh-box"><button id="refresh" class="button primary" type="button">刷新数据 ↻</button><span id="updated">读取快照…</span><span id="live-updated" aria-live="polite">成功率等待更新</span><label class="auto-refresh"><input id="auto-refresh" type="checkbox" checked><span id="auto-refresh-label">成功率每 60 秒更新</span></label></div>
       </div>
-      <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span id="source-scope">全部公开来源</span><span data-model-id>gpt-6-astra</span><span id="scope-multiplier">不限倍率、样本数与成功率</span><span id="scope-count"></span></div>
+      <div class="scope"><span class="live-dot"></span><strong>公开接口真实数据</strong><span id="source-scope">仅 Codex Pro</span><span data-model-id>gpt-6-astra</span><span id="scope-multiplier">不限倍率、样本数与成功率</span><span id="scope-count"></span></div>
       <div id="hosting-note" class="hosting-note" hidden>线上手动快照 · 由维护者在服务器采集并推送更新。检查新快照只读取已发布数据，不触发采集。<div id="snapshot-check" role="status" aria-live="polite"></div></div>
       <div id="notice" role="status" aria-live="polite" hidden></div>
       <div id="collection-recovery" class="collection-recovery" hidden>尚未发布新数据。请等待维护者从服务器推送更新，完成后再检查快照。</div>
       <div id="blacklist-feedback" class="blacklist-feedback" role="status" aria-live="polite" hidden><span id="blacklist-feedback-text"></span><button id="undo-block" type="button" class="text-button" hidden>撤销拉黑</button></div>
       <div id="price-feedback" class="price-feedback" role="status" aria-live="polite" hidden></div>
+      <section class="intelligence-overview" aria-label="渠道智力测试"><div><strong>渠道智力检测</strong><p>GPT6 Astra · Codex Pro · 每日 08:00 / 14:00（香港时间）</p></div><div id="intelligence-summary" aria-live="polite">读取测试结果…</div><small>只测可推荐渠道，每轮确认 8 个正常即停止；临时拉黑优先复测，连续两轮严重降智则永久拉黑。</small></section>
       <section class="workspace">
         <aside class="settings">
           <div class="model-picker"><label class="input-label" for="model-select">选择模型</label><select id="model-select" aria-describedby="model-help"></select>

@@ -10,7 +10,7 @@
   let snapshot = window.ROUTER_SNAPSHOT;
   const requestedModel = new URLSearchParams(location.search).get('model');
   let selectedModel = RouterRank.modelInfo(requestedModel) ? requestedModel : RouterRank.defaults.model;
-  let selectedSource = new URLSearchParams(location.search).get('source') || '';
+  let selectedSource = new URLSearchParams(location.search).get('source') ?? RouterRank.defaults.source;
   const sourceLabels = ['官方', 'Codex Plus', 'Codex Pro', 'Codex 混合号池', 'Grok', 'Gemini', 'CC-Max', 'CC-Kiro', 'CC其它', '国产模型'];
   const activeSnapshot = () => RouterRank.selectSnapshot(snapshot, selectedModel);
   const modelLabel = () => RouterRank.modelInfo(selectedModel).label;
@@ -69,6 +69,13 @@
   const statusLabel = s => ({healthy:'正常',unstable:'波动',failed:'故障',unknown:'无样本'}[s] || '未知');
   const observationHint = '平台观测中 · 仅作提示，不影响评分或推荐';
   const effectiveLabel = r => r.cache === 0 ? '∞' : format(r.effectiveMultiplier, 3);
+  function intelligenceView(r) {
+    const q = r.intelligence;
+    const status = q?.status || 'pending';
+    const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'待测试'}[status] || '待测试';
+    const label = q?.lastError ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
+    return `<div class="intelligence"><span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>固定题目测试 · 每日 08:00 / 14:00（香港时间）<br>第一题 Yes → 正常；第二题含 21 → 轻微；两题均失败 → 严重。</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.tests.map(t => `<p>题 ${escape(t.question)} · ${t.passed ? '通过' : '未通过'} · ${format(t.durationMs / 1000)}s</p><pre>${escape(t.answer)}</pre>`).join('')}${h.error ? `<p>请求异常：${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
+  }
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
@@ -181,15 +188,16 @@
   }
   function renderBlacklist() {
     const entries = blacklist.entries;
+    const automatic = (activeSnapshot()?.rows || []).filter(r => r.intelligence?.blacklist);
     const showing = tab === 'blacklist';
     $('blacklist-panel').hidden = !showing;
-    $('tab-blacklist').textContent = `黑名单 ${entries.length}`;
+    $('tab-blacklist').textContent = `黑名单 ${entries.length + automatic.length}`;
     $('tab-blacklist').setAttribute('aria-pressed', String(showing));
     for (const selector of ['.board-toolbar', '.table-wrap', '.pagination', '.legend']) document.querySelector('.board > ' + selector).hidden = showing;
     $('restore-all').disabled = entries.length === 0;
-    $('blacklist-empty').hidden = entries.length > 0;
+    $('blacklist-empty').hidden = entries.length + automatic.length > 0;
     const current = new Map([...(activeSnapshot()?.rows || []), ...(activeSnapshot()?.lookupRows || [])].map(r => [RouterBlacklist.key(r), r]));
-    $('blacklist-list').innerHTML = entries.map(entry => {
+    $('blacklist-list').innerHTML = automatic.map(r => `<div class="blacklist-entry"><div><b>${escape(r.name)}</b>${intelligenceView(r)}<p>${r.intelligence.blacklist === 'permanent' ? '连续两轮严重降智，停止自动测试。' : '下一轮定时复测，通过后自动解除。'} 搜索渠道编号仍可查看行情。</p></div></div>`).join('') + entries.map(entry => {
       const row = current.get(entry.key);
       return `<div class="blacklist-entry"><div><b>${escape(row?.name || entry.name)}</b><p>${row ? '已从榜单、推荐和调度导出中排除' : '当前快照中没有此渠道，拉黑记录仍保留'} · ${Number.isFinite(Date.parse(entry.blockedAt)) ? escape(stamp(entry.blockedAt)) : '时间未记录'}</p></div><button class="button" type="button" data-restore="${escape(entry.key)}" aria-label="恢复 ${escape(row?.name || entry.name)}">恢复</button></div>`;
     }).join('');
@@ -209,7 +217,7 @@
       ? `榜内 ${found.rows.length} 条 · 未上榜 ${found.outside.length} 条。名次为当前权重下的完整榜单排名。`
       : `当前快照未找到该渠道。搜索范围为官方市场收录的 ${modelLabel()} 渠道；下架或未公开的渠道可能不在其中。`;
     $('search-outside').hidden = !searching || !found.outside.length;
-    $('search-outside').innerHTML = found.outside.map(r => `<article class="lookup-card"><div class="lookup-heading"><h3>${escape(r.name)}</h3><span class="tag warning">未上榜</span></div><p class="lookup-reason">${escape(r.reasons.join('；') || '不符合当前榜单范围')}，不参与排名与推荐。</p><p>${escape(modelLabel())} 成功率 ${percent(r.success)} · ${windowLabel(r.modelWindowHours)} / ${escape(r.modelRequests ?? 0)} 次 · 缓存 ${percent(r.cache)}</p><p>缓存折算倍率 ${effectiveLabel(r)}× · 倍率 ÷ 缓存命中率</p><p>平均 TTFT ${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + 's' : '—'}（全模型近 24h） · ${escape(modelLabel())} 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens</p>${modelTags(r)}${r.blockKey ? `<button class="button" type="button" data-search-restore="${escape(r.blockKey)}">恢复此渠道</button>` : ''}</article>`).join('');
+    $('search-outside').innerHTML = found.outside.map(r => `<article class="lookup-card"><div class="lookup-heading"><h3>${escape(r.name)}</h3><span class="tag warning">未上榜</span></div>${intelligenceView(r)}<p class="lookup-reason">${escape(r.reasons.join('；') || '不符合当前榜单范围')}，不参与排名与推荐。</p><p>${escape(modelLabel())} 成功率 ${percent(r.success)} · ${windowLabel(r.modelWindowHours)} / ${escape(r.modelRequests ?? 0)} 次 · 缓存 ${percent(r.cache)}</p><p>缓存折算倍率 ${effectiveLabel(r)}× · 倍率 ÷ 缓存命中率</p><p>平均 TTFT ${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + 's' : '—'}（全模型近 24h） · ${escape(modelLabel())} 历史实扣 ${format(r.historicalCost, 3)} $/1M tokens</p>${modelTags(r)}${r.blockKey ? `<button class="button" type="button" data-search-restore="${escape(r.blockKey)}">恢复此渠道</button>` : ''}</article>`).join('');
     $('search-outside').querySelectorAll('[data-search-restore]').forEach(b => b.addEventListener('click', () => restoreChannel(b.dataset.searchRestore)));
     return found;
   }
@@ -269,9 +277,11 @@
     $('refresh').disabled = !online || pendingRefresh || pendingLive;
     $('rec-state').textContent = result.stale ? '待刷新' : '满足门槛';
     $('rec-state').className = 'tag' + (result.stale || !result.eligible.length ? ' warning' : '');
+    const testedRows = (activeSnapshot().rows || []).filter(r => r.source === 'Codex Pro');
+    $('intelligence-summary').innerHTML = [['normal','智力正常'],['mild','轻微降智'],['severe','严重降智']].map(([status,label]) => `<span class="intelligence-tag ${status}">${label} ${testedRows.filter(r => r.intelligence?.status === status).length}</span>`).join('') + `<span class="intelligence-note">历史最近结果 · 待测试 ${testedRows.filter(r => !r.intelligence?.status).length}</span>`;
     const top = result.eligible[0];
     if (top) {
-      $('recommend-title').textContent = top.name;
+      $('recommend-title').textContent = top.name + ' · ' + ({normal:'智力正常',mild:'轻微降智',severe:'严重降智'}[top.intelligence?.status] || '待测试');
       $('recommend-copy').textContent = `综合 ${format(top.score)} 分 · ${top.priceSource === 'personal' ? '个人' : '公开'} ${top.multiplier}× · 缓存折算 ${effectiveLabel(top)}× · 首字 ${format(top.latency / 1000)}s · ${modelLabel()} 缓存 ${format(top.cache)}%`;
       $('route-chain').innerHTML = result.eligible.slice(0, 3).map((r, i) => `${i ? '<span class="route-arrow" aria-hidden="true">→</span>' : ''}<div class="route-item"><span>${['首选', '备用 1', '备用 2'][i]}</span><b>${escape(r.channelId)} 号渠道</b></div>`).join('');
     } else {
@@ -287,7 +297,7 @@
     $('tab-eligible').setAttribute('aria-pressed', String(tab === 'eligible'));
     $('tab-excluded').setAttribute('aria-pressed', String(tab === 'excluded'));
     $('eligible-count').textContent = `${result.rows.length} 个渠道 · 总量不限`;
-    $('board-description').textContent = tab === 'blacklist' ? '你的本地黑名单 · 可随时恢复 · 不跨浏览器同步' : tab === 'all' ? '可推荐 50–100 分 · 观察区 0–49 分' : tab === 'eligible' ? '已通过推荐门槛 · 50–100 分' : '未通过推荐门槛，已降至 0–49 分';
+    $('board-description').textContent = tab === 'blacklist' ? '自动测试黑名单 + 你的本地黑名单 · 自动名单由服务器维护' : tab === 'all' ? '可推荐 50–100 分 · 观察区 0–49 分' : tab === 'eligible' ? '已通过推荐门槛 · 50–100 分' : '未通过推荐门槛，已降至 0–49 分';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
     renderSort();
@@ -299,7 +309,7 @@
     $('empty').textContent = tab === 'all' ? (blacklist.entries.length ? '当前没有可显示的渠道。可在黑名单中恢复，或调整筛选条件。' : '没有符合当前筛选条件的渠道。') : tab === 'eligible' ? '暂无渠道通过当前门槛。可查看观察区或黑名单。' : '没有处于观察区的渠道。';
     if (searchQuery.trim()) $('empty').textContent = found.rows.length ? '当前标签没有匹配结果，切换「全部」查看。' : found.outside.length ? '该渠道未上榜，原因见下方。' : '没有匹配的渠道。';
     $('rows').innerHTML = shown.map(r => `<tr class="${r.id === selected ? 'selected' : ''}">
-      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="综合评分第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div><div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
+      <td><div class="channel-cell"><span class="rank-number ${r.overallRank <= 3 ? 'top' : ''}" title="综合评分第 ${r.overallRank} 名">${String(r.overallRank).padStart(2, '0')}</span><div><div class="channel-actions"><button class="channel-name" type="button" data-id="${escape(r.id)}">${escape(r.name)}</button><button class="block-button" type="button" data-block="${escape(r.id)}" aria-label="拉黑 ${escape(r.name)}">拉黑</button></div>${intelligenceView(r)}<div class="channel-sub"><span class="route-status ${r.eligible ? 'ready' : 'observe'}">${r.eligible ? '可推荐' : '观察'}</span>${escape(r.eligible ? '已通过推荐门槛' : r.reasons.join(' / '))}</div>${r.observing ? `<div class="channel-sub">${observationHint}</div>` : ''}</div></div></td>
       <td><span class="score-value${r.eligible ? '' : ' score-downgraded'}" title="基础分 ${format(r.baseScore)}；${r.eligible ? '通过门槛：50 + 基础分 × 0.5' : '未通过门槛：基础分 × 0.49'}">${format(r.score)}</span>${r.eligible ? '' : '<small class="metric-note score-downgraded">已降分</small>'}<div class="score-bar" aria-hidden="true">${['gate', ...keys].map(k => `<span class="${k}" style="width:${r.scoreContributions[k]}%"></span>`).join('')}</div></td>
       <td class="price-cell"><span>${multiplierLabel(r.multiplier)}</span>${r.priceSource === 'personal' ? `<small class="personal-price">个人 · 公开 ${multiplierLabel(r.publicMultiplier)}</small>` : ''}<button class="text-button price-edit" type="button" data-price="${escape(r.id)}" aria-label="修改 ${escape(r.channelId)} 号渠道价格">改价</button></td><td title="倍率 ÷ 缓存命中率（百分比转小数）；越低越好">${effectiveLabel(r)}<span class="number-muted"> ×</span></td><td>${r.latency > 0 ? format(r.latency / 1000) + '<span class="number-muted"> s</span>' : '—'}</td><td>${format(r.cache)}${r.cache == null ? '' : '%'}</td>
       <td class="live-metrics"><div class="number-muted"><span>${escape(modelLabel())}</span> ${percent(r.success)}</div><small>${windowLabel(r.modelWindowHours)} · ${escape(r.modelRequests ?? 0)} 次</small><div class="group-live"><span>全渠道</span> ${percent(r.latestGroupSuccess)}</div><small>${windowLabel(r.groupWindowHours)} · ${escape(r.latestGroupRequests ?? 0)} 次</small></td><td class="number-muted">${percent(r.groupSuccess)}<small class="metric-note">${escape(r.groupRequests ?? 0)} 次</small></td><td class="number-muted">${format(r.historicalCost, 3)}</td></tr><tr class="models-row ${r.id === selected ? 'selected' : ''}"><td colspan="9"><div class="supported-models"><span>支持模型 ${(r.models || [r.model]).length}</span>${modelTags(r)}</div></td></tr>`).join('');
@@ -347,7 +357,7 @@
     const r = lastResult.rows.find(r => r.id === selected);
     $('detail').hidden = !r || tab === 'blacklist' || !RouterRank.matchesQuery(r, searchQuery);
     if ($('detail').hidden) return;
-    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2><p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p>${r.observing ? `<p>${observationHint}</p>` : ''}<p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${multiplierLabel(r.multiplier)} · 公开报价 ${multiplierLabel(r.publicMultiplier)}</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
+    $('detail').innerHTML = `<div class="detail-head"><div><h2>${escape(r.name)}</h2>${intelligenceView(r)}<p>完整榜单第 ${r.overallRank} / ${lastResult.rows.length} 名 · 综合 ${format(r.score)} 分</p><p>${r.eligible ? '已通过推荐门槛，进入 50–100 分档。' : '已降至 0–49 分档：' + escape(r.reasons.join('；'))}</p>${r.observing ? `<p>${observationHint}</p>` : ''}<p>${r.eligible ? `50 + 基础分 ${format(r.baseScore)} × 0.5` : `基础分 ${format(r.baseScore)} × 0.49`} = 综合 ${format(r.score)} 分</p><p>${r.priceSource === 'personal' ? '个人倍率' : '公开倍率'} ${multiplierLabel(r.multiplier)} · 公开报价 ${multiplierLabel(r.publicMultiplier)}</p><p>${escape(modelLabel())} 公开历史实扣 ${format(r.historicalCost, 3)} $/1M tokens · 仅 ${escape(selectedModel)}</p></div><div class="detail-actions"><button id="detail-price" class="button" type="button">修改价格</button><button id="copy-id" class="button" type="button">复制分组 ID</button><button id="detail-block" class="button block-button" type="button">拉黑此渠道</button></div></div>
       <div class="detail-grid"><div><label>缓存折算倍率 / 越低越好</label><b>${effectiveLabel(r)}×</b><p>${escape(r.multiplier)} ÷ ${percent(r.cache)}；比较指标，非实际账单倍率。</p></div><div><label>${escape(modelLabel())} 最新成功率 / ${windowLabel(r.modelWindowHours)}</label><b>${percent(r.success)} · ${escape(r.modelRequests)} 次</b></div><div><label>渠道整体最新成功率 / ${windowLabel(r.groupWindowHours)}</label><b>${percent(r.latestGroupSuccess)} · ${escape(r.latestGroupRequests ?? 0)} 次</b></div><div><label>渠道整体近 24h 成功率</label><b>${percent(r.groupSuccess)} · ${escape(r.groupRequests)} 次</b></div><div><label>${escape(modelLabel())} 缓存命中 / 窗口未单独标注</label><b>${percent(r.cache)}</b></div><div><label>渠道平均 TTFT / 全模型近 24h</label><b>${r.ttftAvg > 0 ? format(r.ttftAvg / 1000) + ' s' : '—'} · ${escape(r.ttftSamples)} 条</b></div><div><label>渠道 P50 / P95 TTFT</label><b>${r.ttftP50 > 0 ? format(r.ttftP50 / 1000) : '—'} / ${r.ttftP95 > 0 ? format(r.ttftP95 / 1000) : '—'} s</b></div></div>
       <div class="breakdown"><span>基础分 ${format(r.baseScore)}：</span>${keys.map(k => `<span><i class="swatch ${k}"></i>${labels[k]}贡献 ${format(r.contributions[k])} 分</span>`).join('')}</div>
       <h3 class="models-title">支持的模型 · ${escape((r.models || [r.model]).length)} 个</h3><p>官方状态采集于 ${stamp(snapshot.liveCapturedAt || snapshot.capturedAt)}${liveError || lastResult.liveStale ? ' · 数据待更新' : ''}</p>
@@ -373,7 +383,7 @@
     selectedSource = event.target.value; selected = null; page = 1; tab = 'all';
     const url = new URL(location.href);
     if (selectedSource) url.searchParams.set('source', selectedSource);
-    else url.searchParams.delete('source');
+    else url.searchParams.set('source', '');
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
