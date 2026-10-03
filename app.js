@@ -71,13 +71,14 @@
   const effectiveLabel = r => r.cache === 0 ? '∞' : format(r.effectiveMultiplier, 3);
   function intelligenceView(r) {
     const q = r.intelligence;
+    const stability = RouterRank.intelligenceStability(q);
     const status = q?.status || (q?.lastError ? 'error' : 'pending');
     const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'尚未测试', error:'请求失败 · 待重试'}[status] || '尚未测试';
     const label = q?.lastError && q?.status ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
-    return `<div class="intelligence"><span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每日 08:00 / 14:00（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
+    return `<div class="intelligence">${stability.label ? `<span class="intelligence-tag ${stability.severity}">${stability.label}${stability.factor < 1 ? ` · ×${stability.factor}` : ` · ${stability.count}/3`}</span>` : ''}<span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每日 08:00 / 14:00（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
   }
   function qualityDiscount(r) {
-    return r.intelligenceFactor === .7 ? '原 ' + format(r.preIntelligenceScore) + ' × 0.7（轻微降智）' : '';
+    return r.intelligenceFactor < 1 ? '原 ' + format(r.preIntelligenceScore) + ' × ' + r.intelligenceFactor + '（最近3次有效检测）' : '';
   }
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
@@ -300,7 +301,7 @@
     $('tab-eligible').setAttribute('aria-pressed', String(tab === 'eligible'));
     $('tab-excluded').setAttribute('aria-pressed', String(tab === 'excluded'));
     $('eligible-count').textContent = `${result.rows.length} 个渠道 · 总量不限`;
-    $('board-description').textContent = tab === 'blacklist' ? '自动测试黑名单 + 你的本地黑名单 · 自动名单由服务器维护' : tab === 'all' ? '推荐基础档 50–100 · 观察基础档 0–49 · 轻微降智再打七折' : tab === 'eligible' ? '已通过推荐门槛 · 轻微降智分数已打七折' : '未通过推荐门槛，已降至 0–49 分';
+    $('board-description').textContent = tab === 'blacklist' ? '自动测试黑名单 + 你的本地黑名单 · 自动名单由服务器维护' : tab === 'all' ? '推荐基础档 50–100 · 观察基础档 0–49 · 最近3次有效检测决定稳定性折扣' : tab === 'eligible' ? '已通过推荐门槛 · 轻微降智分数已打七折' : '未通过推荐门槛，已降至 0–49 分';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
     renderSort();

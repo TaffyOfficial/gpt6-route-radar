@@ -72,6 +72,10 @@ def public_error(message):
         return '未取得可用的渠道专属 Key'
     return '请求失败，未取得有效结果（详细原因仅保留在服务器）'
 
+def completed_history(record):
+    return [{k: h[k] for k in ('at', 'outcome')} for h in record.get('qualityHistory', record.get('history', [])) if h.get('outcome') in ('normal', 'mild', 'severe')][:3]
+
+
 def attach(snapshot):
     state = load_state()
     for data in [snapshot, *snapshot.get('modelSnapshots', {}).values()]:
@@ -80,6 +84,7 @@ def attach(snapshot):
             if record:
                 row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model') if k in record}
             if record:
+                row['intelligence']['qualityHistory'] = completed_history(record)
                 row['intelligence']['history'] = [{**{k: h[k] for k in ('at', 'outcome') if k in h}, **({'error': public_error(h['error'])} if h.get('error') else {})} for h in record.get('history', [])]
                 if record.get('lastError'):
                     row['intelligence']['lastError'] = {'at': record['lastError']['at'], 'message': public_error(record['lastError']['message'])}
@@ -313,6 +318,7 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check,
             event['error'] = error
             record['lastError'] = {'at': timestamp, 'message': error}
         record.update(batch=batch, name=row['name'], groupId=row['id'], history=[event, *previous.get('history', [])][:6])
+        record['qualityHistory'] = ([{'at': timestamp, 'outcome': outcome}] + completed_history(previous))[:3] if outcome in ('normal', 'mild', 'severe') else completed_history(previous)
         state['channels'][k] = record
         persist(state)
         if persist is save_state:

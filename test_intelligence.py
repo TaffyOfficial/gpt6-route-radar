@@ -1,12 +1,17 @@
 import unittest
 from unittest.mock import patch
-from intelligence import passed, transition, check, run_batch
+from intelligence import passed, transition, check, run_batch, completed_history
 
 class Checks(unittest.TestCase):
     def setUp(self):
         self.rule_patch = patch('intelligence.rules', return_value={'firstPattern': 'mock-pass', 'secondPattern': 'mock-backup'})
         self.rule_patch.start()
         self.addCleanup(self.rule_patch.stop)
+
+    def test_completed_history_survives_errors(self):
+        history = [{'at':str(i), 'outcome':outcome} for i,outcome in enumerate(['normal','severe','mild'])]
+        self.assertEqual(completed_history({'qualityHistory':history,'history':[{'at':'x','outcome':'error'}]*6}),history)
+        self.assertEqual(completed_history({'history':[{'at':'x','outcome':'error'},*history]}),history)
 
     def test_answers(self):
         self.assertTrue(passed(1, ' MOCK-PASS '))

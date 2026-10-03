@@ -22,6 +22,13 @@
   const priceReferenceMultiplier = .20;
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function intelligenceStability(q) {
+    const history = (q?.qualityHistory ?? q?.history ?? []).filter(h => ['normal', 'mild', 'severe'].includes(h.outcome)).slice(0, 3);
+    if (!history.length) return {factor: 1, label: '检测样本不足', count: 0, severity: 'pending'};
+    if (history.some(h => h.outcome === 'severe')) return {factor: .5, label: '智力严重不稳定', count: history.length, severity: 'severe'};
+    if (history.some(h => h.outcome === 'mild')) return {factor: .8, label: '智力轻微不稳定', count: history.length, severity: 'mild'};
+    return {factor: 1, label: '', count: history.length, severity: 'normal'};
+  }
   function effectiveMultiplier(row) {
     return finite(row.multiplier) && row.multiplier >= 0 && finite(row.cache) && row.cache > 0 && row.cache <= 100
       ? row.multiplier / (row.cache / 100) : null;
@@ -134,7 +141,7 @@
       const scoreScale = r.eligible ? .5 : .49;
       const gateScore = r.eligible ? 50 : 0;
       r.preIntelligenceScore = gateScore + r.baseScore * scoreScale;
-      r.intelligenceFactor = r.intelligence?.status === 'mild' ? .7 : 1;
+      r.intelligenceFactor = intelligenceStability(r.intelligence).factor;
       r.score = r.preIntelligenceScore * r.intelligenceFactor;
       r.scoreContributions = { gate: gateScore * r.intelligenceFactor, ...Object.fromEntries(Object.entries(r.contributions).map(([k, v]) => [k, v * scoreScale * r.intelligenceFactor])) };
     }
@@ -176,7 +183,7 @@
     if (result.stale) throw Error(result.config.freshnessProfile === 'scheduled' ? '线上快照超过 20 分钟或不完整，请刷新或等待下次采集' : '行情超过 10 分钟、成功率超过 3 分钟或数据不完整，请先刷新');
     if (!result.eligible.length) throw Error('没有满足门槛的渠道');
     const { priceOverrides, ...scoring } = result.config;
-    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: result.config.source || null, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'smooth_price_quality_v2', effectivePriceFormula: '100/(1+(P/0.20)^2)', mildFactor: .7, bandsBeforeQualityDiscount: true, priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3), intelligenceFactor: r.intelligenceFactor, preIntelligenceScore: +r.preIntelligenceScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
+    return { schemaVersion: 2, mode: 'recommendation_only', model: result.config.model, source: result.config.source || null, generatedAt: new Date(now).toISOString(), snapshotAt: snapshot.capturedAt, liveCapturedAt: snapshot.liveCapturedAt || snapshot.capturedAt, validUntil: new Date(Math.min(Date.parse(snapshot.capturedAt) + result.marketMaxAge, Date.parse(snapshot.liveCapturedAt || snapshot.capturedAt) + result.liveMaxAge)).toISOString(), scoring: { ...scoring, method: 'smooth_price_quality_v2', effectivePriceFormula: '100/(1+(P/0.20)^2)', qualityWindow: 3, mildFactor: .8, severeFactor: .5, bandsBeforeQualityDiscount: true, priceScope: 'public_quote', eligibleBand: [50, 100], observationBand: [0, 49] }, channels: result.eligible.slice(0, 3).map((r, i) => ({ priority: i + 1, group_id: r.id, channel_id: r.channelId, source: r.source, name: r.name, multiplier: r.multiplier, publicMultiplier: r.publicMultiplier, priceSource: r.priceSource, cacheHitRate: r.cache, effectiveMultiplier: r.effectiveMultiplier, score: +r.score.toFixed(3), baseScore: +r.baseScore.toFixed(3), intelligenceFactor: r.intelligenceFactor, preIntelligenceScore: +r.preIntelligenceScore.toFixed(3) })), policy: { sessionAffinity: true, maxAttempts: 2, failureCooldownSeconds: 60, retryOnlyBeforeFirstOutput: true }, limitations: ['TTFT is group-wide across all models, 24h', 'Success and cache are model-specific public statistics', 'Cache-adjusted multiplier is a comparison heuristic, not a billing estimate', 'Personal prices affect comparison only; historical spend is still public observed data', 'No live proxy or account route-pool changes are performed', ...(result.config.freshnessProfile === 'scheduled' ? ['Scheduled static snapshot; collection may be delayed; verify live status before routing'] : [])] };
   }
-  return { effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, sortRows, matchesQuery, search };
+  return { intelligenceStability, effectiveMultiplier, models, modelInfo, selectSnapshot, defaults, config, rank, plan, applyStatus, paginate, sortRows, matchesQuery, search };
 });

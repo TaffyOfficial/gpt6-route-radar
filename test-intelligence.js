@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 const R = require('./rank.js');
-const row = (id, status, blacklist) => ({id, channelId:id,name:'channel '+id,source:'Codex Pro',model:'gpt-6-astra',multiplier:.2,verified:true,lifecycle:'active',modelStatus:'healthy',cache:80,ttftAvg:1000,ttftSamples:10,intelligence:{status,blacklist}});
+const row = (id, status, blacklist) => ({id, channelId:id,name:'channel '+id,source:'Codex Pro',model:'gpt-6-astra',multiplier:.2,verified:true,lifecycle:'active',modelStatus:'healthy',cache:80,ttftAvg:1000,ttftSamples:10,intelligence:{status,blacklist,qualityHistory:['normal','normal',status].map(outcome=>({outcome}))}});
 const snapshot = {model:'gpt-6-astra',rows:[row('1','severe','temporary'),row('2','severe','permanent'),row('3','mild'),row('4','normal'),row('5')],complete:true,capturedAt:new Date().toISOString()};
 const r = R.rank(snapshot);
 assert.deepEqual(r.eligible.map(r=>r.id), ['4','5','3']);
@@ -12,9 +12,16 @@ assert.deepEqual(R.plan(snapshot).channels.map(r=>r.channel_id), ['4','5','3']);
 console.log('PASS intelligence recommendation, search and export');
 
 const mild = r.rows.find(x=>x.id==='3');
-assert.ok(Math.abs(mild.score - mild.preIntelligenceScore * .7)<1e-9);
+assert.ok(Math.abs(mild.score - mild.preIntelligenceScore * .8)<1e-9);
 assert.ok(Math.abs(Object.values(mild.scoreContributions).reduce((a,b)=>a+b,0)-mild.score)<1e-9);
-assert.equal(R.plan(snapshot).channels.find(x=>x.channel_id==='3').intelligenceFactor,.7);
+assert.equal(R.plan(snapshot).channels.find(x=>x.channel_id==='3').intelligenceFactor,.8);
 const curve = R.rank({...snapshot,rows:[{...row('a'),multiplier:.1,cache:100},{...row('b'),multiplier:.2,cache:100},{...row('c'),multiplier:.4,cache:100}]}).rows;
 assert.deepEqual(curve.map(x=>x.components.effective),[80,50,20]);
 console.log('PASS smooth price anchors and quality discount consistency');
+
+assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'severe'}]}).factor,.5);
+assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'mild'}]}).factor,.8);
+assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'normal'},{outcome:'severe'}]}).factor,.5);
+assert.equal(R.intelligenceStability({history:[{outcome:'error'},{outcome:'normal'},{outcome:'mild'},{outcome:'normal'}]}).factor,.8);
+assert.equal(R.intelligenceStability({qualityHistory:['normal','mild','severe'].map(outcome=>({outcome}))}).factor,.5);
+assert.equal(R.intelligenceStability({qualityHistory:['normal','normal','normal'].map(outcome=>({outcome}))}).factor,1);
