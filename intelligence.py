@@ -269,7 +269,7 @@ def candidates(snapshot):
     run = subprocess.run(['node', '-e', script], cwd=ROOT, input=json.dumps(snapshot), text=True, encoding='utf-8', capture_output=True, check=True)
     return json.loads(run.stdout)
 
-def run_batch(snapshot, client, batch, state, persist=save_state, checker=check):
+def run_batch(snapshot, client, batch, state, persist=save_state, checker=check, top7_only=False):
     def ranked_rows():
         for row in snapshot['rows']:
             row['intelligence'] = state['channels'].get(key(row), {})
@@ -278,10 +278,11 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
         record = state['channels'].get(key(row), {})
         return record.get('status') in ('normal', 'mild') and not record.get('lastError')
     initial = ranked_rows()
+    print('Current top 7: ' + ', '.join(str(r.get('channelId')) for r in initial[:7]), flush=True)
     if state['batches'].get(batch, {}).get('completedAt') and all(covered(r) for r in initial[:7]):
         return state
     rows = {key(r): r for r in snapshot['rows'] if r['source'] == SOURCE}
-    due = [r for k, r in rows.items() if state['channels'].get(k, {}).get('blacklist') == 'temporary' and state['channels'][k].get('batch') != batch]
+    due = [] if top7_only else [r for k, r in rows.items() if state['channels'].get(k, {}).get('blacklist') == 'temporary' and state['channels'][k].get('batch') != batch]
     normal = sum(v.get('batch') == batch and v.get('status') == 'normal' and not v.get('lastError') for v in state['channels'].values())
     attempted = set()
     def waves():
@@ -289,13 +290,14 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
             while True:
                 ranked = ranked_rows()
                 missing = [r for r in ranked[:7] if not covered(r)]
-                ordinary = [r for r in ranked if r.get('eligible', True)] if normal < 8 else []
+                ordinary = [r for r in ranked if r.get('eligible', True)] if normal < 8 and not top7_only else []
                 queue = {key(r): r for r in [*missing, *ordinary, *due]}
                 wave = [(k, r) for k, r in queue.items() if k not in attempted and state['channels'].get(k, {}).get('blacklist') != 'permanent' and (state['channels'].get(k, {}).get('batch') != batch or state['channels'].get(k, {}).get('lastError'))][:10]
                 if not wave:
                     break
                 attempted.update(k for k, _ in wave)
                 print(f'Starting wave: {len(wave)} channels; normal={normal}; top7 pending={len(missing)}', flush=True)
+                print('Wave channels: ' + ', '.join(str(r.get('channelId')) for _, r in wave), flush=True)
                 futures = [(k, r, pool.submit(checker, client, r)) for k, r in wave]
                 for k, r, future in futures:
                     yield k, r, future.result()
@@ -320,6 +322,11 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
         print(f"Channel {row.get('channelId')}: {outcome}", flush=True)
     top = ranked_rows()[:7]
     missing = [str(r.get('channelId')) for r in top if not covered(r)]
+    if top7_only:
+        state['coverage'] = {'checkedAt': now(), 'top7Covered': not missing, 'top7Pending': missing}
+        print('Top 7 coverage: ' + ('complete' if not missing else 'pending ' + ', '.join(missing)), flush=True)
+        persist(state)
+        return state
     state['batches'][batch] = {'finishedAt': now(), 'normal': normal, 'top7Covered': not missing, 'top7Pending': missing, 'stopReason': 'top7_incomplete' if missing else 'normal_limit' if normal >= 8 else 'candidates_exhausted'}
     if not missing:
         state['batches'][batch]['completedAt'] = now()
@@ -330,10 +337,20 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check)
 
 def main():
     import fcntl
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--top7-only', action='store_true')
+    args = parser.parse_args()
     from collect import collect_all
     STATE.parent.mkdir(parents=True, exist_ok=True)
     with STATE.with_suffix('.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            if args.top7_only:
+                print('Quality test already running; coverage will be checked on next refresh', flush=True)
+                return
+            raise
         hk = datetime.now(timezone(timedelta(hours=8)))
         batch = hk.strftime('%Y-%m-%d') + ('T14' if hk.hour >= 14 else 'T08')
         state = load_state()
@@ -345,7 +362,7 @@ def main():
         snapshot = collect_all()
         client = CodeGo()
         client.login()
-        run_batch(snapshot, client, batch, state)
+        run_batch(snapshot, client, batch, state, top7_only=args.top7_only)
 
 if __name__ == '__main__':
     main()

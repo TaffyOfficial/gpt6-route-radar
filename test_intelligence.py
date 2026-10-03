@@ -54,6 +54,25 @@ class Checks(unittest.TestCase):
         self.assertEqual(state['batches']['batch1']['normal'], 10)
 
 class CoverageTests(unittest.TestCase):
+    def test_refresh_follows_new_leaders_and_retries_failed_results(self):
+        rows = [{'id':str(i),'channelId':i,'name':str(i),'source':'Codex Pro'} for i in range(12)]
+        state = {'channels': {'channel:'+str(i):{'status':'normal','batch':'b'} for i in range(7)}, 'batches': {'b':{'completedAt':'old'}}}
+        state['channels']['channel:11'] = {'blacklist':'temporary','batch':'old'}
+        calls = []
+        def checker(client, row):
+            calls.append(row['channelId'])
+            return ('error', [], 'inference HTTP 429') if len(calls) == 1 else ('normal', [], None)
+        # A previously untested channel enters the leaders after a market refresh.
+        ranked = [rows[7], *rows[:7], *rows[8:]]
+        with patch('intelligence.candidates', return_value=ranked):
+            run_batch({'rows':rows},None,'b',state,persist=lambda s:None,checker=checker,top7_only=True)
+            self.assertEqual(calls, [7])
+            self.assertFalse(state['coverage']['top7Covered'])
+            run_batch({'rows':rows},None,'b',state,persist=lambda s:None,checker=checker,top7_only=True)
+        self.assertEqual(calls, [7, 7])
+        self.assertTrue(state['coverage']['top7Covered'])
+        self.assertEqual(state['batches']['b'], {'completedAt':'old'})
+
     def test_eight_normal_does_not_skip_untested_leaders(self):
         rows = [{'id':str(i),'channelId':i,'name':str(i),'source':'Codex Pro'} for i in range(20)]
         state = {'channels': {'channel:'+str(i):{'status':'normal','batch':'b'} for i in range(10,18)}, 'batches': {'b':{'completedAt':'old'}}}

@@ -1,21 +1,19 @@
 [Unit]
-Description=Collect Route Radar and upload a snapshot to Cloudflare R2
+Description=Fill missing intelligence results for the current top seven after market refresh
 Wants=network-online.target
 After=network-online.target
-OnSuccess=gpt6-route-radar-coverage.service
 
 [Service]
 Type=oneshot
 User=route-radar
 Group=route-radar
+EnvironmentFile=/etc/gpt6-route-radar/codego.env
 EnvironmentFile=/etc/gpt6-route-radar/r2-upload.env
-ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/publish_r2.py
+ExecStart=/usr/bin/python3 /opt/gpt6-route-radar/intelligence.py --top7-only
+ExecStartPost=/usr/bin/python3 /opt/gpt6-route-radar/publish_r2.py
 StateDirectory=gpt6-route-radar
 UMask=0077
-TimeoutStartSec=900
-Nice=10
-CPUQuota=50%
-MemoryMax=256M
+TimeoutStartSec=4h
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
