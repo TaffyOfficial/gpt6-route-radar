@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 const R = require('./rank.js');
-const row = (id, status, blacklist) => ({id, channelId:id,name:'channel '+id,source:'Codex Pro',model:'gpt-6-astra',multiplier:.2,verified:true,lifecycle:'active',modelStatus:'healthy',cache:80,ttftAvg:1000,ttftSamples:10,intelligence:{status,blacklist,qualityHistory:['normal','normal',status].map(outcome=>({outcome}))}});
+const row = (id, status, blacklist) => ({id, channelId:id,name:'channel '+id,source:'Codex Pro',model:'gpt-6-astra',multiplier:.2,verified:true,lifecycle:'active',modelStatus:'healthy',cache:80,ttftAvg:1000,ttftSamples:10,intelligence:{status,blacklist,qualityHistory:['normal','normal',status].map(outcome=>({outcome,at:new Date().toISOString()}))}});
 const snapshot = {model:'gpt-6-astra',rows:[row('1','severe','temporary'),row('2','severe','permanent'),row('3','mild'),row('4','normal'),row('5')],complete:true,capturedAt:new Date().toISOString()};
 const r = R.rank(snapshot);
 assert.deepEqual(r.eligible.map(r=>r.id), ['4','5','3']);
@@ -19,9 +19,21 @@ const curve = R.rank({...snapshot,rows:[{...row('a'),multiplier:.1,cache:100},{.
 assert.deepEqual(curve.map(x=>x.components.effective),[80,50,20]);
 console.log('PASS smooth price anchors and quality discount consistency');
 
-assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'severe'}]}).factor,.5);
-assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'mild'}]}).factor,.8);
-assert.equal(R.intelligenceStability({qualityHistory:[{outcome:'normal'},{outcome:'severe'}]}).factor,.5);
-assert.equal(R.intelligenceStability({history:[{outcome:'error'},{outcome:'normal'},{outcome:'mild'},{outcome:'normal'}]}).factor,.8);
-assert.equal(R.intelligenceStability({qualityHistory:['normal','mild','severe'].map(outcome=>({outcome}))}).factor,.5);
-assert.equal(R.intelligenceStability({qualityHistory:['normal','normal','normal'].map(outcome=>({outcome}))}).factor,1);
+const reference = Date.parse('2026-10-05T16:00:00Z');
+const event = (outcome, hours = 0) => ({outcome, at:new Date(reference - hours * 3600000).toISOString()});
+const stability = events => R.intelligenceStability({qualityHistory:events}, reference);
+assert.equal(stability([event('severe')]).factor,.5);
+assert.equal(stability([event('mild')]).factor,.8);
+assert.equal(stability([event('normal'),event('severe',23)]).factor,.5);
+assert.equal(stability([event('error'),event('normal'),event('mild')]).factor,.8);
+assert.equal(stability([event('normal'),event('mild'),event('severe')]).factor,.5);
+assert.equal(stability([event('normal'),event('normal'),event('normal'),event('severe',23)]).factor,.5);
+assert.equal(stability([event('severe',24),event('normal')]).factor,1);
+assert.equal(stability([event('severe',25),event('mild',23)]).factor,.8);
+assert.equal(stability([event('severe',-1),{outcome:'severe',at:'invalid'}]).factor,1);
+assert.equal(stability([event('normal'),event('normal'),event('normal')]).factor,1);
+assert.equal(stability([]).label,'近24小时无有效检测');
+const timeRow = {...row('time','normal'),intelligence:{status:'normal',qualityHistory:[event('severe',23)]}};
+assert.equal(R.rank({...snapshot,rows:[timeRow]}, {}, reference).rows[0].intelligenceFactor,.5);
+assert.equal(R.rank({...snapshot,rows:[timeRow]}, {}, reference + 3600000).rows[0].intelligenceFactor,1);
+console.log('PASS rolling 24-hour quality window, expiry and ranking clock');

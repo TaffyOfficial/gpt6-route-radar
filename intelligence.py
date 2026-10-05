@@ -28,6 +28,10 @@ def rules():
 def now():
     return datetime.now(timezone.utc).isoformat()
 
+def scheduled_batch(timestamp=None):
+    hk = (timestamp or datetime.now(timezone.utc)).astimezone(timezone(timedelta(hours=8)))
+    return hk.strftime('%Y-%m-%dT%H')
+
 def key(row):
     return 'channel:' + str(row['channelId']) if row.get('channelId') is not None else 'group:' + row['id']
 
@@ -72,8 +76,20 @@ def public_error(message):
         return '未取得可用的渠道专属 Key'
     return '请求失败，未取得有效结果（详细原因仅保留在服务器）'
 
-def completed_history(record):
-    return [{k: h[k] for k in ('at', 'outcome')} for h in record.get('qualityHistory', record.get('history', [])) if h.get('outcome') in ('normal', 'mild', 'severe')][:3]
+def completed_history(record, timestamp=None):
+    reference = timestamp or datetime.now(timezone.utc)
+    cutoff = reference - timedelta(hours=24)
+    history = []
+    for event in record.get('qualityHistory', record.get('history', [])):
+        if event.get('outcome') not in ('normal', 'mild', 'severe'):
+            continue
+        try:
+            at = datetime.fromisoformat(event['at'].replace('Z', '+00:00'))
+            if cutoff < at <= reference:
+                history.append({'at': event['at'], 'outcome': event['outcome']})
+        except (KeyError, TypeError, ValueError):
+            continue
+    return history
 
 
 def attach(snapshot):
@@ -88,7 +104,7 @@ def attach(snapshot):
                 row['intelligence']['history'] = [{**{k: h[k] for k in ('at', 'outcome') if k in h}, **({'error': public_error(h['error'])} if h.get('error') else {})} for h in record.get('history', [])]
                 if record.get('lastError'):
                     row['intelligence']['lastError'] = {'at': record['lastError']['at'], 'message': public_error(record['lastError']['message'])}
-        data['intelligenceSchedule'] = {'timezone': 'Asia/Hong_Kong', 'hours': [8, 14], 'normalLimit': 8}
+        data['intelligenceSchedule'] = {'timezone': 'Asia/Hong_Kong', 'hours': list(range(24)), 'normalLimit': 8, 'stabilityWindowHours': 24}
     return snapshot
 
 def passed(question, answer):
@@ -318,7 +334,8 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check,
             event['error'] = error
             record['lastError'] = {'at': timestamp, 'message': error}
         record.update(batch=batch, name=row['name'], groupId=row['id'], history=[event, *previous.get('history', [])][:6])
-        record['qualityHistory'] = ([{'at': timestamp, 'outcome': outcome}] + completed_history(previous))[:3] if outcome in ('normal', 'mild', 'severe') else completed_history(previous)
+        history = ([{'at': timestamp, 'outcome': outcome}] if outcome in ('normal', 'mild', 'severe') else []) + previous.get('qualityHistory', previous.get('history', []))
+        record['qualityHistory'] = completed_history({'qualityHistory': history}, datetime.fromisoformat(timestamp))
         state['channels'][k] = record
         persist(state)
         if persist is save_state:
@@ -357,8 +374,7 @@ def main():
                 print('Quality test already running; coverage will be checked on next refresh', flush=True)
                 return
             raise
-        hk = datetime.now(timezone(timedelta(hours=8)))
-        batch = hk.strftime('%Y-%m-%d') + ('T14' if hk.hour >= 14 else 'T08')
+        batch = scheduled_batch()
         state = load_state()
         config = rules()
         if len(config.get('questions', [])) != 2:

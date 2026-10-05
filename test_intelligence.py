@@ -1,17 +1,34 @@
 import unittest
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
-from intelligence import passed, transition, check, run_batch, completed_history
+from intelligence import passed, transition, check, run_batch, completed_history, scheduled_batch
 
 class Checks(unittest.TestCase):
+    def test_hourly_batches_use_hong_kong_time(self):
+        def batch(value):
+            return scheduled_batch(datetime.fromisoformat(value).replace(tzinfo=timezone.utc))
+        self.assertEqual(batch('2026-10-05T00:00:00'), '2026-10-05T08')
+        self.assertEqual(batch('2026-10-05T00:59:59'), '2026-10-05T08')
+        self.assertEqual(batch('2026-10-05T01:00:00'), '2026-10-05T09')
+        self.assertEqual(batch('2026-10-05T15:59:59'), '2026-10-05T23')
+        self.assertEqual(batch('2026-10-05T16:00:00'), '2026-10-06T00')
+
     def setUp(self):
         self.rule_patch = patch('intelligence.rules', return_value={'firstPattern': 'mock-pass', 'secondPattern': 'mock-backup'})
         self.rule_patch.start()
         self.addCleanup(self.rule_patch.stop)
 
     def test_completed_history_survives_errors(self):
-        history = [{'at':str(i), 'outcome':outcome} for i,outcome in enumerate(['normal','severe','mild'])]
+        reference = datetime.now(timezone.utc)
+        history = [{'at':(reference-timedelta(hours=i)).isoformat(), 'outcome':outcome} for i,outcome in enumerate(['normal','severe','mild','normal'])]
         self.assertEqual(completed_history({'qualityHistory':history,'history':[{'at':'x','outcome':'error'}]*6}),history)
         self.assertEqual(completed_history({'history':[{'at':'x','outcome':'error'},*history]}),history)
+
+    def test_completed_history_uses_rolling_24_hours(self):
+        reference = datetime(2026, 10, 5, 16, tzinfo=timezone.utc)
+        events = [{'at':(reference-timedelta(hours=h)).isoformat(), 'outcome':'severe'} for h in (23, 24, 25, -1)]
+        events += [{'at':'invalid', 'outcome':'mild'}, {'at':reference.isoformat(), 'outcome':'error'}]
+        self.assertEqual(completed_history({'qualityHistory':events}, reference), events[:1])
 
     def test_answers(self):
         self.assertTrue(passed(1, ' MOCK-PASS '))

@@ -22,9 +22,12 @@
   const priceReferenceMultiplier = .20;
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  function intelligenceStability(q) {
-    const history = (q?.qualityHistory ?? q?.history ?? []).filter(h => ['normal', 'mild', 'severe'].includes(h.outcome)).slice(0, 3);
-    if (!history.length) return {factor: 1, label: '检测样本不足', count: 0, severity: 'pending'};
+  function intelligenceStability(q, now = Date.now()) {
+    const history = (q?.qualityHistory ?? q?.history ?? []).filter(h => {
+      const at = Date.parse(h.at);
+      return ['normal', 'mild', 'severe'].includes(h.outcome) && at > now - 24 * 60 * 60 * 1000 && at <= now;
+    });
+    if (!history.length) return {factor: 1, label: '近24小时无有效检测', count: 0, severity: 'pending'};
     if (history.some(h => h.outcome === 'severe')) return {factor: .5, label: '智力严重不稳定', count: history.length, severity: 'severe'};
     if (history.some(h => h.outcome === 'mild')) return {factor: .8, label: '智力轻微不稳定', count: history.length, severity: 'mild'};
     return {factor: 1, label: '', count: history.length, severity: 'normal'};
@@ -141,7 +144,7 @@
       const scoreScale = r.eligible ? .5 : .49;
       const gateScore = r.eligible ? 50 : 0;
       r.preIntelligenceScore = gateScore + r.baseScore * scoreScale;
-      r.intelligenceFactor = intelligenceStability(r.intelligence).factor;
+      r.intelligenceFactor = intelligenceStability(r.intelligence, now).factor;
       r.score = r.preIntelligenceScore * r.intelligenceFactor;
       r.scoreContributions = { gate: gateScore * r.intelligenceFactor, ...Object.fromEntries(Object.entries(r.contributions).map(([k, v]) => [k, v * scoreScale * r.intelligenceFactor])) };
     }

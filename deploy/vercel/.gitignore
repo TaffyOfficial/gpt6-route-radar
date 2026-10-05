@@ -1,3 +1,5 @@
 .vercel/
 public/
 !api/snapshot.js
+
+.env*
