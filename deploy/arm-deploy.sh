@@ -11,4 +11,3 @@ install -m 644 -o route-radar -g route-radar "$source/deploy/publish_r2.py" "$ta
 chown -R route-radar:route-radar "$target"
 systemctl daemon-reload
 systemctl enable --now gpt6-route-radar-refresh.timer
-systemctl restart gpt6-route-radar-refresh.service

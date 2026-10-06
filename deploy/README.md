@@ -22,11 +22,11 @@ oneshot 服务成功后为 inactive 属于正常状态。程序位于 `/opt/gpt6
 
 `/etc/gpt6-route-radar/r2-upload.env` 为 root:root、0600，仅由 systemd 读取后注入服务环境。包含 `RADAR_UPLOAD_URL` 和专用 `RADAR_UPLOAD_TOKEN`，不包含 Cloudflare 账号 OAuth 或管理 API 凭证。不要将文件内容粘贴到日志、仓库或网页。
 
-代码更新由 GitHub Actions 的 ARM64 self-hosted runner 自动处理：推送 `main` 后，runner 测试并同步 `/opt/gpt6-route-radar`，然后重启采集服务。服务成功后自动上传 R2；Cloudflare Pages 的静态文件保持不变，只通过 `/api/snapshot` 读取 R2。
+代码更新由 GitHub Actions 的 ARM64 self-hosted runner 自动处理：推送 `main` 后，runner 测试并同步 `/opt/gpt6-route-radar`，并保持采集 timer 运行。下一次定时采集自动上传 R2；Cloudflare Pages 的静态文件保持不变，只通过 `/api/snapshot` 读取 R2。CI 不额外触发即时采集，以免连续推送触发上游 429 限流。
 
 当前仓库专用 Runner 为 `route-radar-arm64`，目录 `/opt/actions-runner-radar`，标签 `self-hosted, Linux, ARM64, oracle-route-radar`。`new-api-custom` 的 Runner 只接收其所属仓库的任务，不能接收本仓库任务。
 
-Runner 以 `route-radar` 运行，sudo 只允许执行 root 所有的 `/usr/local/sbin/deploy-route-radar`（内容见 `arm-deploy.sh`）。该脚本同步仓库，将 `deploy/publish_r2.py` 安装到服务使用的根目录，然后重启采集服务。修改部署脚本后须由运维同步到该 root 所有的路径。
+Runner 以 `route-radar` 运行，sudo 只允许执行 root 所有的 `/usr/local/sbin/deploy-route-radar`（内容见 `arm-deploy.sh`）。该脚本同步仓库，将 `deploy/publish_r2.py` 安装到服务使用的根目录，并保持采集 timer 运行。修改部署脚本后须由运维同步到该 root 所有的路径。
 
 页面发布与数据上传分开，详见 [Cloudflare 说明](CLOUDFLARE.md)。
 
