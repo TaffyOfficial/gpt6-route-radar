@@ -66,7 +66,7 @@ def public_error(message):
         stage = '账户登录'
     code = re.search(r'HTTP (\d{3})', message)
     if code:
-        labels = {'429': '被限流', '401': '认证失败', '403': '访问被拒绝', '402': '额度不足', '500': '服务内部错误', '502': '上游网关错误', '503': '服务暂不可用', '504': '网关超时'}
+        labels = {'400': '请求参数被渠道拒绝', '401': '认证失败', '402': '额度不足', '403': '访问被拒绝', '429': '被限流', '500': '服务内部错误', '502': '上游网关错误', '503': '服务暂不可用', '504': '网关超时'}
         return stage + labels.get(code[1], '失败') + '（HTTP ' + code[1] + '）' + ('；旧日志未记录接口阶段' if stage == '请求' else '')
     if 'Incomplete or empty model answer' in message:
         return '模型回答为空或被截断，未进行智力判定'
@@ -189,7 +189,8 @@ class CodeGo:
                 exc.close()
                 if protocol_unavailable:
                     raise ProtocolUnavailable('inference protocol unavailable') from None
-                if status != 429 or attempt == 2:
+                transient = status == 429 or (500 <= status <= 599)
+                if not transient or attempt == 2:
                     raise RuntimeError(stage + ' HTTP ' + str(status)) from None
                 try:
                     delay = float(retry_after)
@@ -201,7 +202,7 @@ class CodeGo:
                 # A very long server backoff is deferred to the next run instead
                 # of holding the batch indefinitely or retrying prematurely.
                 if delay > 60:
-                    raise RuntimeError(stage + ' HTTP 429; retry deferred') from None
+                    raise RuntimeError(stage + ' HTTP ' + str(status) + '; retry deferred') from None
                 time.sleep(max(1, delay))
         if result.get('success') is False or result.get('error') is not None:
             raise RuntimeError(stage + ' rejected request')

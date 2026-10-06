@@ -50,6 +50,13 @@ class CodeGoHttpTests(unittest.TestCase):
         sleep.assert_not_called()
         self.assertEqual(client.opener.open.call_count, 1)
 
+    @patch('intelligence.time.sleep')
+    def test_inference_503_retries_with_backoff(self, sleep):
+        client = self.client([http_error(503), io.BytesIO(json.dumps({'choices': []}).encode())])
+        self.assertEqual(client.api('/v1/chat/completions', {}, bearer='private-token'), {'choices': []})
+        sleep.assert_called_once_with(2)
+        self.assertEqual(client.opener.open.call_count, 2)
+
 
 class StreamTests(CodeGoHttpTests):
     def test_completed_stream_is_parsed(self):
