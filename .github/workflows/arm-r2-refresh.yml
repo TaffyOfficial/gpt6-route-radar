@@ -31,11 +31,20 @@ jobs:
           sudo systemctl daemon-reload
           sudo systemctl enable --now gpt6-route-radar-refresh.timer
           sudo systemctl restart gpt6-route-radar-refresh.service
-      - name: Publish static Pages frontend
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  publish-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Cloudflare credentials
         run: |
-          python build_pages.py --pages --no-refresh
-          npx wrangler@4.24.0 pages deploy dist --project-name route-radar --branch main
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is missing'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is missing'; exit 1; }
+      - name: Build Pages frontend
+        run: python build_pages.py --pages --no-refresh
+      - name: Publish Pages frontend
+        run: npx wrangler@4.24.0 pages deploy dist --project-name route-radar --branch main
