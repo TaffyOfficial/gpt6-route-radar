@@ -117,7 +117,7 @@ def passed(question, answer):
     config = rules()
     if question == 1:
         return bool(re.fullmatch(config['firstPattern'], answer.strip(), re.IGNORECASE))
-    return bool(re.fullmatch('Yes', answer.strip(), re.IGNORECASE))
+    return bool(re.search(config['secondPattern'], answer))
 
 def transition(previous, outcome, timestamp):
     result = dict(previous)
@@ -259,20 +259,12 @@ class CodeGo:
         return token if token.startswith('sk-') else 'sk-' + token
 
     def answer(self, token, question):
-        prompt = TOOL_PROBE_PROMPT if question == 2 else rules()['questions'][question - 1]
-        if question == 2:
-            # Tool probing must use a tool-capable protocol from the first request.
-            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'tools': [{'type': 'function', 'name': 'exec_command', 'description': 'Execute the supplied command', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}, 'required': ['command']}}], 'stream': False}, bearer=token)
-            follow = self._complete_tool_probe(token, result)
-            messages = [item for item in follow.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
-            answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
-            return answer, follow.get('usage', {}), follow.get('model')
+        prompt = rules()['questions'][question - 1]
         try:
             result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
         except ProtocolUnavailable:
             # Only an explicit protocol rejection permits another request.
             result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'tools': [{'type': 'function', 'name': 'exec_command', 'description': 'Execute the supplied command', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}, 'required': ['command']}}], 'stream': False}, bearer=token)
-            result = self._complete_tool_probe(token, result) if question == 2 else result
             messages = [item for item in result.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
             answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
             if result.get('status') != 'completed' or any(item.get('status') not in (None, 'completed') for item in messages) or not answer.strip():
@@ -318,12 +310,8 @@ def check(client, row):
             answer, usage, returned_model = client.answer(token, question)
             ok = passed(question, answer)
             tests.append({'question': question, 'promptVersion': 1, 'answer': answer, 'passed': ok, 'durationMs': round((time.monotonic()-started)*1000), 'usage': usage, 'returnedModel': returned_model})
-            if question == 2 and not ok:
-                raise RuntimeError('tool probe failed')
-            if question == 2:
-                return ('normal' if ok else 'error'), tests, None if ok else 'tool probe failed'
-            if not ok:
-                return 'severe', tests, None
+            if ok:
+                return ('normal' if question == 1 else 'mild'), tests, None
         return 'severe', tests, None
     except Exception as exc:
         # Only controlled errors are exposed, never credential-bearing request objects.

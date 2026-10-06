@@ -33,8 +33,8 @@ class Checks(unittest.TestCase):
     def test_answers(self):
         self.assertTrue(passed(1, ' MOCK-PASS '))
         self.assertFalse(passed(1, 'other'))
-        self.assertTrue(passed(2, 'Yes'))
-        self.assertFalse(passed(2, 'result: mock-backup'))
+        self.assertTrue(passed(2, 'result: mock-backup'))
+        self.assertFalse(passed(2, 'Yes'))
         self.assertFalse(passed(2, 'other'))
 
     def test_blacklist_recovery_and_errors(self):
@@ -56,8 +56,8 @@ class Checks(unittest.TestCase):
                 self.calls.append(question)
                 return 'mock-pass', {}, 'gpt-6-astra'
         c = Client()
-        self.assertEqual(check(c, {})[0], 'error')
-        self.assertEqual(c.calls, [1, 2])
+        self.assertEqual(check(c, {})[0], 'normal')
+        self.assertEqual(c.calls, [1])
         c.answer = lambda *args: ('No', {}, 'gpt-6-astra')
         self.assertEqual(check(c, {})[0], 'severe')
 
@@ -65,7 +65,7 @@ class Checks(unittest.TestCase):
         class Client:
             def channel_key(self, row): return 'private'
             def answer(self, token, question):
-                if question == 1: return 'mock-pass', {}, 'gpt-6-astra'
+                if question == 1: return 'No', {}, 'gpt-6-astra'
                 raise RuntimeError('tool probe failed')
         outcome, tests, error = check(Client(), {})
         self.assertEqual(outcome, 'error')
@@ -76,32 +76,30 @@ class Checks(unittest.TestCase):
         class Client:
             def channel_key(self, row): return 'private'
             def answer(self, token, question):
-                if question == 1: return 'mock-pass', {}, 'gpt-6-astra'
+                if question == 1: return 'No', {}, 'gpt-6-astra'
                 raise RuntimeError('inference HTTP 429')
         outcome, tests, error = check(Client(), {})
         self.assertEqual(outcome, 'error')
         self.assertFalse(any(test.get('toolUnavailable') for test in tests))
         self.assertEqual(error, 'inference HTTP 429')
 
-    def test_tool_probe_success_is_normal(self):
+    def test_second_question_success_is_mild(self):
         class Client:
             def channel_key(self, row): return 'private'
             def answer(self, token, question):
-                return ('mock-pass' if question == 1 else 'Yes'), {}, 'gpt-6-astra'
-        with patch('intelligence.passed', side_effect=lambda question, answer: answer in ('mock-pass', 'Yes')):
-            self.assertEqual(check(Client(), {})[0], 'normal')
+                return ('No' if question == 1 else 'mock-backup'), {}, 'gpt-6-astra'
+        outcome, tests, error = check(Client(), {})
+        self.assertEqual((outcome, error), ('mild', None))
+        self.assertEqual([test['passed'] for test in tests], [False, True])
 
-    def test_tool_probe_uses_responses_with_a_real_tool_call(self):
+    def test_second_question_uses_quality_prompt(self):
         client = CodeGo()
-        call = {'type': 'function_call', 'call_id': 'call-1', 'arguments': '{"command":"printf TOOL_PROBE_OK"}'}
-        reply = {'status': 'completed', 'model': 'gpt-6-astra', 'output': [{'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Yes'}]}]}
-        with patch.object(client, 'api', side_effect=[{'id': 'response-1', 'output': [call]}, reply]) as api, \
-             patch('intelligence.subprocess.run') as run:
-            run.return_value.stdout = 'TOOL_PROBE_OK'
-            self.assertEqual(client.answer('private', 2)[0], 'Yes')
-        self.assertEqual([c.args[0] for c in api.call_args_list], ['/v1/responses', '/v1/responses'])
-        self.assertEqual(api.call_args_list[0].args[1]['tools'][0]['name'], 'exec_command')
-        self.assertEqual(api.call_args_list[1].args[1]['input'][0]['output'], 'TOOL_PROBE_OK')
+        reply = {'choices': [{'message': {'content': 'mock-backup'}, 'finish_reason': 'stop'}]}
+        with patch('intelligence.rules', return_value={'questions': ['first', 'second']}), \
+             patch.object(client, 'api', return_value=reply) as api:
+            self.assertEqual(client.answer('private', 2)[0], 'mock-backup')
+        self.assertEqual(api.call_args[0][0], '/v1/chat/completions')
+        self.assertEqual(api.call_args[0][1]['messages'][0]['content'], 'second')
 
     def test_tool_probe_failure_is_persisted_on_record(self):
         row = {'id': 'x', 'channelId': 1, 'name': 'x', 'source': 'Codex Pro'}
