@@ -54,7 +54,7 @@ class Checks(unittest.TestCase):
                 self.calls.append(question)
                 return 'mock-pass', {}, 'gpt-6-astra'
         c = Client()
-        self.assertEqual(check(c, {})[0], 'error')
+        self.assertEqual(check(c, {})[0], 'severe')
         self.assertEqual(c.calls, [1, 2])
         c.answer = lambda *args: ('No', {}, 'gpt-6-astra')
         self.assertEqual(check(c, {})[0], 'error')
