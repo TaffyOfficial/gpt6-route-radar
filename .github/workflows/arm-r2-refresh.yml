@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-refresh:
-    runs-on: [self-hosted, Linux, ARM64, oracle-newapi-arm64]
+    runs-on: [self-hosted, Linux, ARM64, oracle-newapi]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
