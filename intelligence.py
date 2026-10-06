@@ -117,7 +117,7 @@ def passed(question, answer):
     config = rules()
     if question == 1:
         return bool(re.fullmatch(config['firstPattern'], answer.strip(), re.IGNORECASE))
-    return bool(re.search(config['secondPattern'], answer))
+    return bool(re.fullmatch('Yes', answer.strip(), re.IGNORECASE))
 
 def transition(previous, outcome, timestamp):
     result = dict(previous)
@@ -127,6 +127,7 @@ def transition(previous, outcome, timestamp):
     result.update(status=outcome, severeStreak=streak, checkedAt=timestamp, model=MODEL,
                   blacklist=('permanent' if streak >= 2 else 'temporary') if outcome == 'severe' else None)
     result.pop('lastError', None)
+    result.pop('toolUnavailable', None)
     return result
 
 class CodeGo:
@@ -259,6 +260,13 @@ class CodeGo:
 
     def answer(self, token, question):
         prompt = TOOL_PROBE_PROMPT if question == 2 else rules()['questions'][question - 1]
+        if question == 2:
+            # Tool probing must use a tool-capable protocol from the first request.
+            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'tools': [{'type': 'function', 'name': 'exec_command', 'description': 'Execute the supplied command', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}, 'required': ['command']}}], 'stream': False}, bearer=token)
+            follow = self._complete_tool_probe(token, result)
+            messages = [item for item in follow.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
+            answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
+            return answer, follow.get('usage', {}), follow.get('model')
         try:
             result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
         except ProtocolUnavailable:
@@ -302,6 +310,7 @@ class CodeGo:
 
 def check(client, row):
     tests = []
+    question = None
     try:
         token = client.channel_key(row)
         for question in (1, 2):
@@ -312,14 +321,14 @@ def check(client, row):
             if question == 2 and not ok:
                 raise RuntimeError('tool probe failed')
             if question == 2:
-                return ('mild' if ok else 'error'), tests, None if ok else 'tool probe failed'
+                return ('normal' if ok else 'error'), tests, None if ok else 'tool probe failed'
             if not ok:
                 return 'severe', tests, None
         return 'severe', tests, None
     except Exception as exc:
         # Only controlled errors are exposed, never credential-bearing request objects.
         error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
-        if error.startswith('tool probe'):
+        if question == 2 and error.startswith('tool probe'):
             tests.append({'question': 2, 'promptVersion': 2, 'passed': False, 'toolUnavailable': True})
         return 'error', tests, error
 
@@ -371,6 +380,8 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check,
         if error:
             event['error'] = error
             record['lastError'] = {'at': timestamp, 'message': error}
+            if tests and any(test.get('toolUnavailable') for test in tests):
+                record['toolUnavailable'] = True
         record.update(batch=batch, name=row['name'], groupId=row['id'], history=[event, *previous.get('history', [])][:6])
         history = ([{'at': timestamp, 'outcome': outcome}] if outcome in ('normal', 'mild', 'severe') else []) + previous.get('qualityHistory', previous.get('history', []))
         record['qualityHistory'] = completed_history({'qualityHistory': history}, datetime.fromisoformat(timestamp))

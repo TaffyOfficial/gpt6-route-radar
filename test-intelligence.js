@@ -17,6 +17,8 @@ assert.ok(Math.abs(Object.values(mild.scoreContributions).reduce((a,b)=>a+b,0)-m
 assert.equal(R.plan(snapshot).channels.find(x=>x.channel_id==='3').intelligenceFactor,.8);
 const tool = R.rank({...snapshot, rows:[{...row('tool','normal'), intelligence:{toolUnavailable:true}}]}).rows[0];
 assert.equal(tool.intelligenceFactor,.8);
+const legacyTool = R.rank({...snapshot, rows:[{...row('legacy','normal'), intelligence:{lastError:{message:'无法调用工具'}}}]}).rows[0];
+assert.equal(legacyTool.intelligenceFactor,.8);
 const curve = R.rank({...snapshot,rows:[{...row('a'),multiplier:.1,cache:100},{...row('b'),multiplier:.2,cache:100},{...row('c'),multiplier:.4,cache:100}]}).rows;
 assert.deepEqual(curve.map(x=>x.components.effective),[80,50,20]);
 console.log('PASS smooth price anchors and quality discount consistency');

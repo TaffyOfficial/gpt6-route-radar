@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch
-from intelligence import passed, transition, check, run_batch, completed_history, scheduled_batch
+from intelligence import CodeGo, passed, transition, check, run_batch, completed_history, scheduled_batch
 
 class Checks(unittest.TestCase):
     def test_hourly_batches_use_hong_kong_time(self):
@@ -33,7 +33,8 @@ class Checks(unittest.TestCase):
     def test_answers(self):
         self.assertTrue(passed(1, ' MOCK-PASS '))
         self.assertFalse(passed(1, 'other'))
-        self.assertTrue(passed(2, 'result: mock-backup'))
+        self.assertTrue(passed(2, 'Yes'))
+        self.assertFalse(passed(2, 'result: mock-backup'))
         self.assertFalse(passed(2, 'other'))
 
     def test_blacklist_recovery_and_errors(self):
@@ -45,6 +46,7 @@ class Checks(unittest.TestCase):
             recovered = transition(first, outcome, 't2')
             self.assertIsNone(recovered['blacklist'])
             self.assertEqual(recovered['severeStreak'], 0)
+            self.assertNotIn('toolUnavailable', transition({'toolUnavailable': True}, outcome, 't2'))
 
     def test_short_circuit_and_incomplete_request(self):
         class Client:
@@ -57,7 +59,7 @@ class Checks(unittest.TestCase):
         self.assertEqual(check(c, {})[0], 'error')
         self.assertEqual(c.calls, [1, 2])
         c.answer = lambda *args: ('No', {}, 'gpt-6-astra')
-        self.assertEqual(check(c, {})[0], 'error')
+        self.assertEqual(check(c, {})[0], 'severe')
 
     def test_tool_probe_failure_is_explicit(self):
         class Client:
@@ -69,6 +71,45 @@ class Checks(unittest.TestCase):
         self.assertEqual(outcome, 'error')
         self.assertTrue(tests[-1]['toolUnavailable'])
         self.assertEqual(error, 'tool probe failed')
+
+    def test_request_failure_is_not_a_tool_failure(self):
+        class Client:
+            def channel_key(self, row): return 'private'
+            def answer(self, token, question):
+                if question == 1: return 'mock-pass', {}, 'gpt-6-astra'
+                raise RuntimeError('inference HTTP 429')
+        outcome, tests, error = check(Client(), {})
+        self.assertEqual(outcome, 'error')
+        self.assertFalse(any(test.get('toolUnavailable') for test in tests))
+        self.assertEqual(error, 'inference HTTP 429')
+
+    def test_tool_probe_success_is_normal(self):
+        class Client:
+            def channel_key(self, row): return 'private'
+            def answer(self, token, question):
+                return ('mock-pass' if question == 1 else 'Yes'), {}, 'gpt-6-astra'
+        with patch('intelligence.passed', side_effect=lambda question, answer: answer in ('mock-pass', 'Yes')):
+            self.assertEqual(check(Client(), {})[0], 'normal')
+
+    def test_tool_probe_uses_responses_with_a_real_tool_call(self):
+        client = CodeGo()
+        call = {'type': 'function_call', 'call_id': 'call-1', 'arguments': '{"command":"printf TOOL_PROBE_OK"}'}
+        reply = {'status': 'completed', 'model': 'gpt-6-astra', 'output': [{'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Yes'}]}]}
+        with patch.object(client, 'api', side_effect=[{'id': 'response-1', 'output': [call]}, reply]) as api, \
+             patch('intelligence.subprocess.run') as run:
+            run.return_value.stdout = 'TOOL_PROBE_OK'
+            self.assertEqual(client.answer('private', 2)[0], 'Yes')
+        self.assertEqual([c.args[0] for c in api.call_args_list], ['/v1/responses', '/v1/responses'])
+        self.assertEqual(api.call_args_list[0].args[1]['tools'][0]['name'], 'exec_command')
+        self.assertEqual(api.call_args_list[1].args[1]['input'][0]['output'], 'TOOL_PROBE_OK')
+
+    def test_tool_probe_failure_is_persisted_on_record(self):
+        row = {'id': 'x', 'channelId': 1, 'name': 'x', 'source': 'Codex Pro'}
+        state = {'channels': {}, 'batches': {}}
+        with patch('intelligence.candidates', return_value=[row]):
+            run_batch({'rows': [row]}, None, 'b', state, persist=lambda s: None,
+                      checker=lambda c, r: ('error', [{'toolUnavailable': True}], 'tool probe failed'))
+        self.assertTrue(state['channels']['channel:1']['toolUnavailable'])
 
     def test_budget_blacklist_retest_and_idempotence(self):
         rows = [{'id': str(i), 'channelId': i, 'name': str(i), 'source': 'Codex Pro'} for i in range(12)]
