@@ -24,13 +24,15 @@
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function intelligenceStability(q, now = Date.now()) {
-    if (q?.toolUnavailable || q?.lastError?.message === '无法调用工具') return {factor: .8, label: '无法调用工具', count: 1, severity: 'mild'};
     const history = (q?.qualityHistory ?? q?.history ?? []).filter(h => {
       const at = Date.parse(h.at);
       return ['normal', 'mild', 'severe'].includes(h.outcome) && at > now - 24 * 60 * 60 * 1000 && at <= now;
     });
-    if (!history.length) return {factor: 1, label: '近24小时无有效检测', count: 0, severity: 'pending'};
+    const errorAt = Date.parse(q?.lastError?.at);
+    const recentError = errorAt > now - 24 * 60 * 60 * 1000 && errorAt <= now;
     if (history.some(h => h.outcome === 'severe')) return {factor: .5, label: '智力严重不稳定', count: history.length, severity: 'severe'};
+    if (q?.toolUnavailable || recentError) return {factor: .8, label: q?.toolUnavailable || q?.lastError?.message === '无法调用工具' ? '无法调用工具' : '检测请求失败 · 待复测', count: history.length, severity: 'mild'};
+    if (!history.length) return {factor: 1, label: '近24小时无有效检测', count: 0, severity: 'pending'};
     if (history.some(h => h.outcome === 'mild')) return {factor: .8, label: '智力轻微不稳定', count: history.length, severity: 'mild'};
     return {factor: 1, label: '', count: history.length, severity: 'normal'};
   }

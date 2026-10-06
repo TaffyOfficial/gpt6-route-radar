@@ -78,7 +78,7 @@
     return `<div class="intelligence">${stability.label ? `<span class="intelligence-tag ${stability.severity}">${stability.label}${stability.factor < 1 ? ` · ×${stability.factor}` : ` · 24小时窗口`}</span>` : ''}<span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每小时整点（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
   }
   function qualityDiscount(r) {
-    return r.intelligenceFactor < 1 ? '原 ' + format(r.preIntelligenceScore) + ' × ' + r.intelligenceFactor + '（最近24小时有效检测）' : '';
+    return r.intelligenceFactor < 1 ? '原 ' + format(r.preIntelligenceScore) + ' × ' + r.intelligenceFactor + '（最近24小时检测状态）' : '';
   }
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
