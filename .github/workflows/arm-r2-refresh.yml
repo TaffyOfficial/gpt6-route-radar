@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build-and-refresh:
-    runs-on: [self-hosted, Linux, ARM64, oracle-newapi]
+    runs-on: [self-hosted, Linux, ARM64, oracle-route-radar]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -24,13 +24,7 @@ jobs:
           node test-r2-upload.mjs
           python -m unittest test_collect.py test_pages.py test_trigger.py
       - name: Install collector and refresh R2
-        run: |
-          sudo install -d -o route-radar -g route-radar /opt/gpt6-route-radar
-          sudo rsync -a --delete --exclude='.git' --exclude='snapshot.json' --exclude='snapshot.js' ./ /opt/gpt6-route-radar/
-          sudo chown -R route-radar:route-radar /opt/gpt6-route-radar
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now gpt6-route-radar-refresh.timer
-          sudo systemctl restart gpt6-route-radar-refresh.service
+        run: sudo /usr/local/sbin/deploy-route-radar
 
   publish-frontend:
     runs-on: ubuntu-latest
