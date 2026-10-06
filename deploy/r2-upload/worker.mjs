@@ -1,5 +1,5 @@
 // Only the private collector invokes this Worker. Public reads go directly to R2/CDN.
-const MODELS = ['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol'];
+const MODELS = ['gpt-6.1-sol', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol'];
 const MAX_BYTES = 8 * 1024 * 1024;
 
 async function bounded(stream) {

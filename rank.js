@@ -5,6 +5,7 @@
   'use strict';
   const models = [
     { id: 'gpt-6-astra', label: 'GPT6 Astra', source: null },
+    { id: 'gpt-6.1-sol', label: 'GPT6.1 Sol', source: null },
     { id: 'claude-opus-5', label: 'Opus 5', source: null },
     { id: 'claude-opus-5-5', label: 'Opus 5.5', source: null },
     { id: 'claude-sonnet-5', label: 'Sonnet 5', source: null },

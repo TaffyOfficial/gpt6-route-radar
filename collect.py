@@ -12,6 +12,7 @@ BASE = 'https://shu26.cfd'
 MODEL = 'gpt-6-astra'
 MODELS = {
     MODEL: None,
+    'gpt-6.1-sol': None,
     'claude-opus-5': None,
     'claude-opus-5-5': None,
     'claude-sonnet-5': None,

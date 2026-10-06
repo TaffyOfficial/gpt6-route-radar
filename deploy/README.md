@@ -2,7 +2,7 @@
 
 采集任务运行于私有配置指定的服务器。原主机定时器已停用，保留配置用于回滚。
 
-模型包含 Opus 5.5（`claude-opus-5-5`）；所有模型采集全部来源，由页面筛选来源，选择会保存在 URL 的 `source` 参数中。
+模型包含 GPT6.1 Sol（`gpt-6.1-sol`）和 Opus 5.5（`claude-opus-5-5`）；所有模型采集全部来源，由页面筛选来源，选择会保存在 URL 的 `source` 参数中。
 
 服务名保持 `gpt6-route-radar-refresh.service`，现在只采集并上传 R2 数据，不再推送 GitHub 分支或部署网页。
 
@@ -22,7 +22,7 @@ oneshot 服务成功后为 inactive 属于正常状态。程序位于 `/opt/gpt6
 
 `/etc/gpt6-route-radar/r2-upload.env` 为 root:root、0600，仅由 systemd 读取后注入服务环境。包含 `RADAR_UPLOAD_URL` 和专用 `RADAR_UPLOAD_TOKEN`，不包含 Cloudflare 账号 OAuth 或管理 API 凭证。不要将文件内容粘贴到日志、仓库或网页。
 
-旧 `publish_pages.py` 和 `trigger_refresh.py` 仅留档，正常更新不用它们。原 GitHub 采集工作流保持禁用。
+代码更新由 GitHub Actions 的 ARM64 self-hosted runner 自动处理：推送 `main` 后，runner 测试并同步 `/opt/gpt6-route-radar`，然后重启采集服务。服务成功后自动上传 R2；Cloudflare Pages 的静态文件保持不变，只通过 `/api/snapshot` 读取 R2。
 
 页面发布与数据上传分开，详见 [Cloudflare 说明](CLOUDFLARE.md)。
 

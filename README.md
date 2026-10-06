@@ -17,6 +17,7 @@ MIT 开源。公开行情数据来自 CodeGo，数据权利归原提供方。
 | 显示名称 | API 模型 ID | 来源范围 |
 | --- | --- | --- |
 | GPT6 Astra | `gpt-6-astra` | 全部公开来源 |
+| GPT6.1 Sol | `gpt-6.1-sol` | 全部公开来源 |
 | Opus 5 | `claude-opus-5` | 全部公开来源 |
 | Opus 5.5 | `claude-opus-5-5` | 全部公开来源 |
 | Sonnet 5 | `claude-sonnet-5` | 全部公开来源 |

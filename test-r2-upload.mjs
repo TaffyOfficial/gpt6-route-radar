@@ -4,7 +4,7 @@ import worker from './deploy/r2-upload/worker.mjs';
 
 const capturedAt = new Date().toISOString();
 const base = { schemaVersion: 2, complete: true, capturedAt, rows: [], count: 0 };
-const snapshot = { ...base, modelSnapshots: Object.fromEntries(['claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol'].map(m => [m, { ...base }])) };
+const snapshot = { ...base, modelSnapshots: Object.fromEntries(['gpt-6.1-sol', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol'].map(m => [m, { ...base }])) };
 const writes = [];
 const env = { UPLOAD_TOKEN: 'test-only', SNAPSHOTS: { put: async (...args) => writes.push(args) } };
 const request = (data, token = 'test-only') => new Request('https://upload.example/snapshot', { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: gzipSync(JSON.stringify(data)) });

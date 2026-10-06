@@ -1,54 +1,33 @@
-name: Refresh data and deploy Pages
+name: Build on ARM and refresh R2
 
 on:
-  # Paused in repository settings. Kept only as an explicitly enabled fallback.
-  # Normal publishing: server runs deploy/publish_pages.py and pushes gh-pages.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
+  build-and-refresh:
+    runs-on: [self-hosted, Linux, ARM64, oracle-newapi-arm64]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - name: Verify ranking and collector
         run: |
           node test-rank.js
           node test-blacklist.js
           node test-prices.js
+          node test-r2-upload.mjs
           python -m unittest test_collect.py test_pages.py test_trigger.py
-      - name: Collect public market and build static site
-        run: python build_pages.py
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-          retention-days: 1
-
-  deploy:
-    needs: build
-    concurrency:
-      group: route-radar-pages-deploy
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy project site
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Install collector and refresh R2
+        run: |
+          sudo install -d -o route-radar -g route-radar /opt/gpt6-route-radar
+          sudo rsync -a --delete --exclude='.git' --exclude='snapshot.json' --exclude='snapshot.js' ./ /opt/gpt6-route-radar/
+          sudo chown -R route-radar:route-radar /opt/gpt6-route-radar
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now gpt6-route-radar-refresh.timer
+          sudo systemctl restart gpt6-route-radar-refresh.service

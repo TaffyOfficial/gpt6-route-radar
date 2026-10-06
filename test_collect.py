@@ -92,7 +92,7 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNone(collect.normalize([group], *args)['rows'][0]['historicalCost'])
 
     def test_selected_model_controls_source_verification_cost_and_status(self):
-        models = ['claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol', 'gpt-5.6-terra']
+        models = ['gpt-6.1-sol', 'claude-opus-5-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'gpt-5.6-sol', 'gpt-5.6-terra']
         for model in models:
             with self.subTest(model=model):
                 source = 'Codex Pro' if model.startswith('gpt') else 'CC-Max'
@@ -137,7 +137,7 @@ class CollectorTests(unittest.TestCase):
         with patch.object(collect, 'get_json', return_value={'data': []}) as get, patch.object(collect, 'collect', side_effect=one) as run:
             out = collect.collect_all()
             self.assertEqual(get.call_count, 3)
-            self.assertEqual(run.call_count, 7)
+            self.assertEqual(run.call_count, 8)
             self.assertEqual(out['model'], collect.MODEL)
             self.assertEqual(set(out['modelSnapshots']), set(collect.MODELS) - {collect.MODEL})
 
