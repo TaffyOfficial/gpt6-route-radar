@@ -74,7 +74,7 @@
     const stability = RouterRank.intelligenceStability(q);
     const status = q?.status || (q?.lastError ? 'error' : 'pending');
     const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'尚未测试', error:'请求失败 · 待重试'}[status] || '尚未测试';
-    const label = q?.lastError && q?.status ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
+    const label = q?.toolUnavailable ? '无法调用工具' : q?.lastError && q?.status ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
     return `<div class="intelligence">${stability.label ? `<span class="intelligence-tag ${stability.severity}">${stability.label}${stability.factor < 1 ? ` · ×${stability.factor}` : ` · 24小时窗口`}</span>` : ''}<span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每小时整点（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
   }
   function qualityDiscount(r) {

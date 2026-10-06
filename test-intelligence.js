@@ -15,6 +15,8 @@ const mild = r.rows.find(x=>x.id==='3');
 assert.ok(Math.abs(mild.score - mild.preIntelligenceScore * .8)<1e-9);
 assert.ok(Math.abs(Object.values(mild.scoreContributions).reduce((a,b)=>a+b,0)-mild.score)<1e-9);
 assert.equal(R.plan(snapshot).channels.find(x=>x.channel_id==='3').intelligenceFactor,.8);
+const tool = R.rank({...snapshot, rows:[{...row('tool','normal'), intelligence:{toolUnavailable:true}}]}).rows[0];
+assert.equal(tool.intelligenceFactor,.8);
 const curve = R.rank({...snapshot,rows:[{...row('a'),multiplier:.1,cache:100},{...row('b'),multiplier:.2,cache:100},{...row('c'),multiplier:.4,cache:100}]}).rows;
 assert.deepEqual(curve.map(x=>x.components.effective),[80,50,20]);
 console.log('PASS smooth price anchors and quality discount consistency');

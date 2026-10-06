@@ -54,10 +54,21 @@ class Checks(unittest.TestCase):
                 self.calls.append(question)
                 return 'mock-pass', {}, 'gpt-6-astra'
         c = Client()
-        self.assertEqual(check(c, {})[0], 'normal')
-        self.assertEqual(c.calls, [1])
-        c.answer = lambda *args: ('No', {}, 'gpt-6-astra')
         self.assertEqual(check(c, {})[0], 'severe')
+        self.assertEqual(c.calls, [1, 2])
+        c.answer = lambda *args: ('No', {}, 'gpt-6-astra')
+        self.assertEqual(check(c, {})[0], 'error')
+
+    def test_tool_probe_failure_is_explicit(self):
+        class Client:
+            def channel_key(self, row): return 'private'
+            def answer(self, token, question):
+                if question == 1: return 'mock-pass', {}, 'gpt-6-astra'
+                raise RuntimeError('tool probe failed')
+        outcome, tests, error = check(Client(), {})
+        self.assertEqual(outcome, 'error')
+        self.assertTrue(tests[-1]['toolUnavailable'])
+        self.assertEqual(error, 'tool probe failed')
 
     def test_budget_blacklist_retest_and_idempotence(self):
         rows = [{'id': str(i), 'channelId': i, 'name': str(i), 'source': 'Codex Pro'} for i in range(12)]

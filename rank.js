@@ -24,6 +24,7 @@
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   function intelligenceStability(q, now = Date.now()) {
+    if (q?.toolUnavailable) return {factor: .8, label: '无法调用工具', count: 1, severity: 'mild'};
     const history = (q?.qualityHistory ?? q?.history ?? []).filter(h => {
       const at = Date.parse(h.at);
       return ['normal', 'mild', 'severe'].includes(h.outcome) && at > now - 24 * 60 * 60 * 1000 && at <= now;

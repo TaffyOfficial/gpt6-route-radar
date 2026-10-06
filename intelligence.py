@@ -15,6 +15,10 @@ from pathlib import Path
 
 MODEL = 'gpt-6-astra'
 SOURCE = 'Codex Pro'
+TOOL_PROBE_COMMAND = 'printf TOOL_PROBE_OK'
+TOOL_PROBE_PROMPT = ('Can you actually use the provided command tool? Call exec_command with the exact command supplied below. '
+                     'Only after receiving its real TOOL_PROBE_OK result, answer Yes. If the tool is unavailable or fails, answer No. '
+                     'Answer only Yes or No. Do not simulate a tool call or invent its output.\n\n' + TOOL_PROBE_COMMAND)
 ROOT = Path(__file__).resolve().parent
 STATE = Path(os.environ.get('RADAR_INTELLIGENCE_STATE', '/var/lib/gpt6-route-radar/intelligence.json'))
 RULES = Path(os.environ.get('RADAR_INTELLIGENCE_RULES', '/etc/gpt6-route-radar/intelligence-rules.json'))
@@ -51,6 +55,8 @@ def public_error(message):
     message = str(message)
     if message == 'inference protocol unavailable':
         return '该渠道不支持请求的模型 API 协议'
+    if message.startswith('tool probe'):
+        return '无法调用工具'
     stage = '模型调用' if message.startswith('inference') else '管理接口' if message.startswith('management:') else '请求'
     if message.startswith('management:') and '/key' in message:
         stage = '获取 Key'
@@ -98,7 +104,7 @@ def attach(snapshot):
         for row in [*data.get('rows', []), *data.get('lookupRows', [])]:
             record = state['channels'].get(key(row))
             if record:
-                row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model') if k in record}
+                row['intelligence'] = {k: record[k] for k in ('status', 'blacklist', 'checkedAt', 'model', 'toolUnavailable') if k in record}
             if record:
                 row['intelligence']['qualityHistory'] = completed_history(record)
                 row['intelligence']['history'] = [{**{k: h[k] for k in ('at', 'outcome') if k in h}, **({'error': public_error(h['error'])} if h.get('error') else {})} for h in record.get('history', [])]
@@ -252,12 +258,13 @@ class CodeGo:
         return token if token.startswith('sk-') else 'sk-' + token
 
     def answer(self, token, question):
-        prompt = rules()['questions'][question - 1]
+        prompt = TOOL_PROBE_PROMPT if question == 2 else rules()['questions'][question - 1]
         try:
             result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
         except ProtocolUnavailable:
             # Only an explicit protocol rejection permits another request.
-            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
+            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'tools': [{'type': 'function', 'name': 'exec_command', 'description': 'Execute the supplied command', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}, 'required': ['command']}}], 'stream': False}, bearer=token)
+            result = self._complete_tool_probe(token, result) if question == 2 else result
             messages = [item for item in result.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
             answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
             if result.get('status') != 'completed' or any(item.get('status') not in (None, 'completed') for item in messages) or not answer.strip():
@@ -269,6 +276,30 @@ class CodeGo:
             raise RuntimeError('Incomplete or empty model answer')
         return answer, result.get('usage', {}), result.get('model')
 
+    def _complete_tool_probe(self, token, result):
+        output = result.get('output', [])
+        calls = [item for item in output if item.get('type') in ('function_call', 'tool_call')]
+        if len(calls) != 1:
+            raise RuntimeError('tool probe unavailable')
+        call = calls[0]
+        args = call.get('arguments', {})
+        if isinstance(args, str):
+            try: args = json.loads(args)
+            except json.JSONDecodeError: args = {}
+        if args.get('command') != TOOL_PROBE_COMMAND:
+            raise RuntimeError('tool probe failed')
+        try:
+            probe = subprocess.run(['printf', 'TOOL_PROBE_OK'], capture_output=True, text=True, timeout=5, check=True)
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError('tool probe failed') from None
+        if probe.stdout != 'TOOL_PROBE_OK':
+            raise RuntimeError('tool probe failed')
+        follow = self.api('/v1/responses', {'model': MODEL, 'previous_response_id': result.get('id'), 'input': [{'type': 'function_call_output', 'call_id': call.get('call_id'), 'output': probe.stdout}], 'tools': [{'type': 'function', 'name': 'exec_command', 'description': 'Execute the supplied command', 'parameters': {'type': 'object', 'properties': {'command': {'type': 'string'}}, 'required': ['command']}}], 'stream': False}, bearer=token)
+        answer = ''.join(part.get('text', '') for item in follow.get('output', []) if item.get('type') == 'message' for part in item.get('content', []) if part.get('type') == 'output_text')
+        if follow.get('status') != 'completed' or not re.fullmatch(r'Yes', answer.strip(), re.IGNORECASE):
+            raise RuntimeError('tool probe failed')
+        return follow
+
 def check(client, row):
     tests = []
     try:
@@ -278,12 +309,19 @@ def check(client, row):
             answer, usage, returned_model = client.answer(token, question)
             ok = passed(question, answer)
             tests.append({'question': question, 'promptVersion': 1, 'answer': answer, 'passed': ok, 'durationMs': round((time.monotonic()-started)*1000), 'usage': usage, 'returnedModel': returned_model})
-            if ok:
-                return ('normal' if question == 1 else 'mild'), tests, None
+            if question == 2 and not ok:
+                raise RuntimeError('tool probe failed')
+            if question == 2:
+                return ('mild' if ok else 'error'), tests, None if ok else 'tool probe failed'
+            if not ok:
+                return 'severe', tests, None
         return 'severe', tests, None
     except Exception as exc:
         # Only controlled errors are exposed, never credential-bearing request objects.
-        return 'error', tests, str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        error = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        if error.startswith('tool probe'):
+            tests.append({'question': 2, 'promptVersion': 2, 'passed': False, 'toolUnavailable': True})
+        return 'error', tests, error
 
 def candidates(snapshot):
     script = "const fs=require('fs');const R=require('./rank.js');const s=JSON.parse(fs.readFileSync(0,'utf8'));process.stdout.write(JSON.stringify(R.rank(s,{source:'Codex Pro',model:'gpt-6-astra',freshnessProfile:'scheduled'}).rows));"
