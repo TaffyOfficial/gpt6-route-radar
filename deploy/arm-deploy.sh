@@ -7,6 +7,7 @@ target=/opt/gpt6-route-radar
 test -f "$source/collect.py"
 install -d -o route-radar -g route-radar "$target"
 rsync -a --delete --exclude='.git' --exclude='snapshot.json' --exclude='snapshot.js' "$source/" "$target/"
+install -m 644 -o route-radar -g route-radar "$source/deploy/publish_r2.py" "$target/publish_r2.py"
 chown -R route-radar:route-radar "$target"
 systemctl daemon-reload
 systemctl enable --now gpt6-route-radar-refresh.timer

@@ -47,7 +47,7 @@ Fable 5.1 使用市场实际收录的 `claude-fable-5-1`，不与其他别名混
 
 成功率来自 CodeGo 官方 `/api/group-status`。同时展示 所选模型最新成功率、渠道整体最新成功率，以及市场近 24h 成功率。界面注明采集时间、统计窗口和样本量；渠道窗口按该渠道子模型一致的窗口展示，不一致时标为未标注。
 
-Cloudflare 静态版：ARM 每 10 分钟采集全部模型并将一份压缩 JSON 上传至 R2；代码更新时 ARM Runner 同步发布静态 Pages 前端，网页每 60 秒检查新快照，CDN 缓存约 60 秒。访客流量由 Cloudflare 承担，不访问采集服务器。
+Cloudflare 静态版：ARM 每 10 分钟采集全部模型并将一份压缩 JSON 上传至 R2；推送 `main` 后，专用 ARM Runner 自动测试、更新采集服务并上传 R2。网页每 60 秒检查新快照，CDN 缓存约 60 秒。静态前端修改另行发布 Pages。访客流量由 Cloudflare 承担，不访问采集服务器。
 
 网页的「检查新快照」只读取数据，不触发采集；采集失败保留上一份完整快照和真实时间。服务器可执行 `systemctl start gpt6-route-radar-refresh.service` 立即更新数据，详见 [运维说明](deploy/README.md)。
 

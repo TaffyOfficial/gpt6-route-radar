@@ -24,6 +24,10 @@ oneshot 服务成功后为 inactive 属于正常状态。程序位于 `/opt/gpt6
 
 代码更新由 GitHub Actions 的 ARM64 self-hosted runner 自动处理：推送 `main` 后，runner 测试并同步 `/opt/gpt6-route-radar`，然后重启采集服务。服务成功后自动上传 R2；Cloudflare Pages 的静态文件保持不变，只通过 `/api/snapshot` 读取 R2。
 
+当前仓库专用 Runner 为 `route-radar-arm64`，目录 `/opt/actions-runner-radar`，标签 `self-hosted, Linux, ARM64, oracle-route-radar`。`new-api-custom` 的 Runner 只接收其所属仓库的任务，不能接收本仓库任务。
+
+Runner 以 `route-radar` 运行，sudo 只允许执行 root 所有的 `/usr/local/sbin/deploy-route-radar`（内容见 `arm-deploy.sh`）。该脚本同步仓库，将 `deploy/publish_r2.py` 安装到服务使用的根目录，然后重启采集服务。修改部署脚本后须由运维同步到该 root 所有的路径。
+
 页面发布与数据上传分开，详见 [Cloudflare 说明](CLOUDFLARE.md)。
 
 ## 智力测试运维
