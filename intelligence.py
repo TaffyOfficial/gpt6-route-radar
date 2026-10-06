@@ -254,10 +254,10 @@ class CodeGo:
     def answer(self, token, question):
         prompt = rules()['questions'][question - 1]
         try:
-            result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False, 'max_completion_tokens': 4096}, bearer=token)
+            result = self.api('/v1/chat/completions', {'model': MODEL, 'messages': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
         except ProtocolUnavailable:
             # Only an explicit protocol rejection permits another request.
-            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'stream': False, 'max_output_tokens': 4096}, bearer=token)
+            result = self.api('/v1/responses', {'model': MODEL, 'input': [{'role': 'user', 'content': prompt}], 'stream': False}, bearer=token)
             messages = [item for item in result.get('output', []) if item.get('type') == 'message' and item.get('role') == 'assistant']
             answer = ''.join(part.get('text', '') for item in messages for part in item.get('content', []) if part.get('type') == 'output_text')
             if result.get('status') != 'completed' or any(item.get('status') not in (None, 'completed') for item in messages) or not answer.strip():
