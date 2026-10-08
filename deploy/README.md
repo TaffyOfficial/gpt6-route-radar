@@ -38,7 +38,7 @@ Runner 以 `route-radar` 运行，sudo 只允许执行 root 所有的 `/usr/loca
 
 `systemctl start gpt6-route-radar-intelligence.service` 手动执行当前时段；同一香港日期和小时的批次幂等，不重复扣费。手动调用归当前香港时间小时，定时器每小时整点运行。首次部署首轮在部署时执行，此后由 timer 定时运行。`journalctl -u gpt6-route-radar-intelligence.service` 查看进度。每渠道完成即原子保存状态，10 分钟行情上传会带上新结果，整轮完成再发布一次。
 
-人工解除自动黑名单：先停止测试 service，对状态文件按固定 `channel:<编号>` 删除该条记录（保留 JSONL 日志），再启动行情刷新。后续重新进入推荐范围时会再测；不要通过浏览器本地“恢复”按钮假装解除服务器黑名单。
+自动严重降智黑名单已取消。加载状态时忽略旧自动黑名单，检测服务保存时清除旧记录的 `blacklist` 标记，保留质量检测历史。发布后启动行情刷新服务即可把释放结果同步到公开快照。
 
 测试题及判定表达式通过服务器私有文件 `intelligence-rules.json` 配置，权限 root:route-radar 0640。公网只发布状态和时间，原始回答仅存服务器日志。
 

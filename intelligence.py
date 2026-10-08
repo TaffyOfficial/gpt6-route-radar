@@ -42,7 +42,19 @@ def key(row):
 def load_state():
     if not STATE.exists():
         return {'channels': {}, 'batches': {}}
-    return json.loads(STATE.read_text('utf-8'))
+    state = json.loads(STATE.read_text('utf-8'))
+    release_automatic_blacklist(state)
+    return state
+
+def release_automatic_blacklist(state):
+    """Release legacy automatic blocks while retaining quality history."""
+    released = 0
+    for record in state.get('channels', {}).values():
+        if record.get('blacklist') in ('temporary', 'permanent'):
+            record['blacklist'] = None
+            released += 1
+    return released
+
 
 def save_state(state):
     STATE.parent.mkdir(parents=True, exist_ok=True)
@@ -120,12 +132,12 @@ def passed(question, answer):
     return bool(re.search(config['secondPattern'], answer))
 
 def transition(previous, outcome, timestamp):
-    result = dict(previous)
+    result = {**previous, 'blacklist': None}
     if outcome == 'error':
-        return result  # Neither forgive a previous failure nor blacklist an untested channel.
+        return result  # Keep the previous quality result on request failure.
     streak = previous.get('severeStreak', 0) + 1 if outcome == 'severe' else 0
     result.update(status=outcome, severeStreak=streak, checkedAt=timestamp, model=MODEL,
-                  blacklist=('permanent' if streak >= 2 else 'temporary') if outcome == 'severe' else None)
+                  blacklist=None)
     result.pop('lastError', None)
     result.pop('toolUnavailable', None)
     return result
@@ -327,19 +339,19 @@ def candidates(snapshot):
     return json.loads(run.stdout)
 
 def run_batch(snapshot, client, batch, state, persist=save_state, checker=check, top7_only=False):
+    if release_automatic_blacklist(state):
+        persist(state)
     def ranked_rows():
         for row in snapshot['rows']:
             row['intelligence'] = state['channels'].get(key(row), {})
-        return [r for r in candidates(snapshot) if not state['channels'].get(key(r), {}).get('blacklist')]
+        return candidates(snapshot)
     def covered(row):
         record = state['channels'].get(key(row), {})
-        return record.get('status') in ('normal', 'mild') and not record.get('lastError')
+        return record.get('status') in ('normal', 'mild', 'severe') and not record.get('lastError')
     initial = ranked_rows()
     print('Current top 7: ' + ', '.join(str(r.get('channelId')) for r in initial[:7]), flush=True)
     if state['batches'].get(batch, {}).get('completedAt') and all(covered(r) for r in initial[:7]):
         return state
-    rows = {key(r): r for r in snapshot['rows'] if r['source'] == SOURCE}
-    due = [] if top7_only else [r for k, r in rows.items() if state['channels'].get(k, {}).get('blacklist') == 'temporary' and state['channels'][k].get('batch') != batch]
     normal = sum(v.get('batch') == batch and v.get('status') == 'normal' and not v.get('lastError') for v in state['channels'].values())
     attempted = set()
     def waves():
@@ -348,8 +360,8 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check,
                 ranked = ranked_rows()
                 missing = [r for r in ranked[:7] if not covered(r)]
                 ordinary = [r for r in ranked if r.get('eligible', True)] if normal < 8 and not top7_only else []
-                queue = {key(r): r for r in [*missing, *ordinary, *due]}
-                wave = [(k, r) for k, r in queue.items() if k not in attempted and state['channels'].get(k, {}).get('blacklist') != 'permanent' and (state['channels'].get(k, {}).get('batch') != batch or state['channels'].get(k, {}).get('lastError'))][:10]
+                queue = {key(r): r for r in [*missing, *ordinary]}
+                wave = [(k, r) for k, r in queue.items() if k not in attempted and (state['channels'].get(k, {}).get('batch') != batch or state['channels'].get(k, {}).get('lastError'))][:10]
                 if not wave:
                     break
                 attempted.update(k for k, _ in wave)
@@ -360,8 +372,6 @@ def run_batch(snapshot, client, batch, state, persist=save_state, checker=check,
                     yield k, r, future.result()
     for k, row, checked in waves():
         previous = state['channels'].get(k, {})
-        if previous.get('blacklist') == 'permanent':
-            continue
         outcome, tests, error = checked
         timestamp = now()
         record = transition(previous, outcome, timestamp)

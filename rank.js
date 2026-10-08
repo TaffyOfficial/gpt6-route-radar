@@ -19,7 +19,7 @@
     if ((snapshot.model || defaults.model) === model) return snapshot;
     return snapshot.modelSnapshots?.[model] || { ...snapshot, model, source: modelInfo(model)?.source, rows: [], lookupRows: [], count: 0, complete: false, modelSnapshots: undefined };
   }
-  const defaults = { model: 'gpt-6-astra', source: 'Codex Pro', minMultiplier: 0, minSamples: 0, minSuccess: 0, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
+  const defaults = { model: 'gpt-6-astra', source: 'Codex Pro', minMultiplier: 0, minSamples: 0, minSamples24h: 10, minSuccess: 0, ttftMetric: 'ttftAvg', weights: { price: 0, ttft: 35, cache: 0, effective: 60, cost: 5 } };
   const priceReferenceMultiplier = .20;
   const finite = v => typeof v === 'number' && Number.isFinite(v);
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -84,7 +84,7 @@
     const c = { ...defaults, ...input, weights: { ...defaults.weights, ...input.weights } };
     if (!modelInfo(c.model)) throw Error('未知模型');
     // User-defined thresholds have no imposed range or rounding; blank means off.
-    for (const key of ['minMultiplier', 'minSamples', 'minSuccess']) {
+    for (const key of ['minMultiplier', 'minSamples', 'minSamples24h', 'minSuccess']) {
       const value = Number(c[key]);
       c[key] = Number.isFinite(value) ? value : 0;
     }
@@ -114,7 +114,7 @@
     const candidates = new Map([...(snapshot.lookupRows || []), ...snapshot.rows].map(r => [r.id, r]));
     const inScope = [...candidates.values()].filter(r => (!c.source || r.source === c.source) && r.model === c.model &&
       (c.minMultiplier === 0 || (finite(r.multiplier) && r.multiplier >= c.minMultiplier)));
-    const isBlocked = r => ['temporary', 'permanent'].includes(r.intelligence?.blacklist) || blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
+    const isBlocked = r => blockedKeys.has('group:' + r.id) || (r.channelId != null && blockedKeys.has('channel:' + String(r.channelId)));
     const blocked = inScope.filter(isBlocked);
     // Personal prices affect scoring, while model scope and blacklist stay unchanged.
     const matches = inScope.filter(r => !isBlocked(r)).map(r => prices.apply(r, c.priceOverrides));
@@ -124,7 +124,8 @@
       if (!r.verified || !['active', 'degraded'].includes(r.lifecycle)) reasons.push('未通过验证或不可用');
       // The platform observation flag is informational, not an availability gate.
       if (r.modelStatus === 'failed') reasons.push('当前模型故障');
-      if (c.minSamples > 0 && (!finite(r.modelRequests) || r.modelRequests < c.minSamples)) reasons.push('低于你设置的样本数');
+      if (c.minSamples > 0 && (r.modelWindowHours !== 1 || !finite(r.modelRequests) || r.modelRequests < c.minSamples)) reasons.push('未满足1小时请求样本门槛');
+      if (c.minSamples24h > 0 && (!finite(r.groupRequests) || r.groupRequests < c.minSamples24h)) reasons.push('未满足24小时请求样本门槛（渠道全模型）');
       if (c.minSuccess > 0 && (!finite(r.success) || r.success < c.minSuccess)) reasons.push('低于你设置的成功率');
       if (!finite(r[c.ttftMetric]) || r[c.ttftMetric] <= 0 || !finite(r.ttftSamples) || r.ttftSamples <= 0) reasons.push('缺少有效 TTFT');
       if (!finite(r.cache) || r.cache < 0 || r.cache > 100) reasons.push('缺少有效缓存统计');
@@ -154,7 +155,7 @@
     }
     rows.sort((a, b) => b.score - a.score || a.multiplier - b.multiplier || a.id.localeCompare(b.id));
     rows.forEach((r, i) => { r.overallRank = i + 1; });
-    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible).sort((a, b) => ({normal: 0, mild: 2}[a.intelligence?.status] ?? 1) - ({normal: 0, mild: 2}[b.intelligence?.status] ?? 1) || b.score - a.score), excluded: rows.filter(r => !r.eligible) };
+    return { config: c, stale, liveStale, marketMaxAge, liveMaxAge, rows, blocked, eligible: rows.filter(r => r.eligible).sort((a, b) => ({normal: 0, mild: 2, severe: 3}[a.intelligence?.status] ?? 1) - ({normal: 0, mild: 2, severe: 3}[b.intelligence?.status] ?? 1) || b.score - a.score), excluded: rows.filter(r => !r.eligible) };
   }
   function matchesQuery(row, query) {
     const q = String(query || '').trim().toLowerCase();
@@ -173,7 +174,6 @@
     const outside = [...candidates.values()].filter(r => !ranked.has(r.id) && matchesQuery(r, query)).map(r => {
       const reasons = [];
       const blockKey = blocked.has('channel:' + r.channelId) ? 'channel:' + r.channelId : blocked.has('group:' + r.id) ? 'group:' + r.id : null;
-      if (r.intelligence?.blacklist) reasons.push('严重降智 · ' + (r.intelligence.blacklist === 'permanent' ? '永久拉黑' : '已拉黑，等待复测'));
       if (blockKey) reasons.push('已被你拉黑');
       if (!finite(r.multiplier)) reasons.push('缺少倍率');
       else if (r.multiplier < result.config.minMultiplier) reasons.push(`倍率 ${r.multiplier}×，低于你设置的 ${result.config.minMultiplier}×`);

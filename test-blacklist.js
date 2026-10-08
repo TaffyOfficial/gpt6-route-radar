@@ -36,7 +36,7 @@ test('malformed saved data does not crash the app',()=>{
  assert.equal(B.normalize([null,{}, {key:'invalid',name:'x'}, {key:'channel:100',name:'valid'}]).length,1);
 });
 test('blacklisted channels never affect ranking, recommendations or route export',()=>{
- const now=Date.now(),base={...row,source:'Codex Pro',model:'gpt-6-astra',multiplier:.22,verified:true,lifecycle:'active',observing:false,modelStatus:'healthy',modelRequests:100,success:99,cache:85,ttftAvg:5000,ttftSamples:100,historicalCost:.001};
+ const now=Date.now(),base={...row,source:'Codex Pro',model:'gpt-6-astra',multiplier:.22,verified:true,lifecycle:'active',observing:false,modelStatus:'healthy',modelRequests:100,groupRequests:100,success:99,cache:85,ttftAvg:5000,ttftSamples:100,historicalCost:.001};
  const snapshot={capturedAt:new Date(now).toISOString(),complete:true,rows:[base,{...base,id:'b',channelId:'200',historicalCost:1}]};
  const cfg={blockedKeys:['channel:100']};const ranked=R.rank(snapshot,cfg,now);
  assert.equal(ranked.rows.length,1);assert.equal(ranked.eligible[0].channelId,'200');assert.equal(ranked.blocked.length,1);

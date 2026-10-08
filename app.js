@@ -75,7 +75,7 @@
     const status = q?.status || (q?.lastError ? 'error' : 'pending');
     const text = {normal:'智力正常', mild:'轻微降智', severe:'严重降智', pending:'尚未测试', error:'请求失败 · 待重试'}[status] || '尚未测试';
     const label = q?.toolUnavailable ? '无法调用工具' : q?.lastError && q?.status ? '测试异常 · ' + (q.status ? '保留上次结果' : '待重试') : '';
-    return `<div class="intelligence">${stability.label ? `<span class="intelligence-tag ${stability.severity}">${stability.label}${stability.factor < 1 ? ` · ×${stability.factor}` : ` · 24小时窗口`}</span>` : ''}<span class="intelligence-tag ${escape(status)}">${text}</span>${q?.blacklist ? `<span class="intelligence-tag severe">${q.blacklist === 'permanent' ? '永久拉黑' : '已拉黑'}</span>` : ''}${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每小时整点（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
+    return `<div class="intelligence">${stability.label ? `<span class="intelligence-tag ${stability.severity}">${stability.label}${stability.factor < 1 ? ` · ×${stability.factor}` : ` · 24小时窗口`}</span>` : ''}<span class="intelligence-tag ${escape(status)}">${text}</span>${label ? `<span class="intelligence-note">${label}</span>` : ''}${q?.lastError ? `<span class="intelligence-note">${escape(stamp(q.lastError.at))} · ${escape(q.lastError.message)}</span>` : ''}${q?.checkedAt ? `<span class="intelligence-note">${escape(stamp(q.checkedAt))} · GPT6 Astra</span>` : ''}${q?.history?.length ? `<details class="intelligence-log"><summary>测试记录</summary><p>自动质量检测 · 每小时整点（香港时间）</p>${q.history.map(h => `<article><b>${escape(stamp(h.at))} · ${escape({normal:'智力正常',mild:'轻微降智',severe:'严重降智',error:'测试异常'}[h.outcome] || h.outcome)}</b>${h.error ? `<p>${escape(h.error)}</p>` : ''}</article>`).join('')}</details>` : ''}</div>`;
   }
   function qualityDiscount(r) {
     return r.intelligenceFactor < 1 ? '原 ' + format(r.preIntelligenceScore) + ' × ' + r.intelligenceFactor + '（最近24小时检测状态）' : '';
@@ -83,7 +83,7 @@
   function modelTags(r) { return `<div class="model-tags">${(r.models || [r.model]).map(m => `<span class="model-tag${m === selectedModel ? ' target-model' : ''}">${escape(m)}</span>`).join('')}</div>`; }
 
   function configuration() {
-    return { model: selectedModel, source: selectedSource, weights, minMultiplier: filterNumber('min-multiplier'), minSamples: filterNumber('min-samples'), minSuccess: filterNumber('min-success'), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
+    return { model: selectedModel, source: selectedSource, weights, minMultiplier: filterNumber('min-multiplier'), minSamples: filterNumber('min-samples'), minSamples24h: filterNumber('min-samples-24h'), minSuccess: filterNumber('min-success'), ttftMetric: $('ttft-metric').value, freshnessProfile: staticHosting ? 'scheduled' : 'local', blockedKeys: blacklist.entries.map(e => e.key), priceOverrides: prices.entries };
   }
   function priceRows() {
     const data = activeSnapshot();
@@ -192,16 +192,15 @@
   }
   function renderBlacklist() {
     const entries = blacklist.entries;
-    const automatic = (activeSnapshot()?.rows || []).filter(r => r.intelligence?.blacklist);
     const showing = tab === 'blacklist';
     $('blacklist-panel').hidden = !showing;
-    $('tab-blacklist').textContent = `黑名单 ${entries.length + automatic.length}`;
+    $('tab-blacklist').textContent = `黑名单 ${entries.length}`;
     $('tab-blacklist').setAttribute('aria-pressed', String(showing));
     for (const selector of ['.board-toolbar', '.table-wrap', '.pagination', '.legend']) document.querySelector('.board > ' + selector).hidden = showing;
     $('restore-all').disabled = entries.length === 0;
-    $('blacklist-empty').hidden = entries.length + automatic.length > 0;
+    $('blacklist-empty').hidden = entries.length > 0;
     const current = new Map([...(activeSnapshot()?.rows || []), ...(activeSnapshot()?.lookupRows || [])].map(r => [RouterBlacklist.key(r), r]));
-    $('blacklist-list').innerHTML = automatic.map(r => `<div class="blacklist-entry"><div><b>${escape(r.name)}</b>${intelligenceView(r)}<p>${r.intelligence.blacklist === 'permanent' ? '连续两轮严重降智，停止自动测试。' : '下一轮定时复测，通过后自动解除。'} 搜索渠道编号仍可查看行情。</p></div></div>`).join('') + entries.map(entry => {
+    $('blacklist-list').innerHTML = entries.map(entry => {
       const row = current.get(entry.key);
       return `<div class="blacklist-entry"><div><b>${escape(row?.name || entry.name)}</b><p>${row ? '已从榜单、推荐和调度导出中排除' : '当前快照中没有此渠道，拉黑记录仍保留'} · ${Number.isFinite(Date.parse(entry.blockedAt)) ? escape(stamp(entry.blockedAt)) : '时间未记录'}</p></div><button class="button" type="button" data-restore="${escape(entry.key)}" aria-label="恢复 ${escape(row?.name || entry.name)}">恢复</button></div>`;
     }).join('');
@@ -259,7 +258,7 @@
     try { result = RouterRank.rank(snapshot, configuration()); }
     catch (e) { lastResult = null; $('export').disabled = true; note(e.message, true); return; }
     lastResult = result;
-    $('scope-multiplier').textContent = [[result.config.minMultiplier, '倍率', '×'], [result.config.minSamples, '样本', ''], [result.config.minSuccess, '成功率', '%']].map(([value, label, unit]) => value === 0 ? label + '不限' : label + ' ≥ ' + value + unit).join(' · ');
+    $('scope-multiplier').textContent = [[result.config.minMultiplier, '倍率', '×'], [result.config.minSamples, '1小时样本', ''], [result.config.minSamples24h, '24小时样本', ''], [result.config.minSuccess, '成功率', '%']].map(([value, label, unit]) => value === 0 ? label + '不限' : label + ' ≥ ' + value + unit).join(' · ');
     const found = renderSearch(result);
     document.querySelectorAll('[data-preset]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset)));
     const time = new Date(snapshot.capturedAt);
@@ -301,7 +300,7 @@
     $('tab-eligible').setAttribute('aria-pressed', String(tab === 'eligible'));
     $('tab-excluded').setAttribute('aria-pressed', String(tab === 'excluded'));
     $('eligible-count').textContent = `${result.rows.length} 个渠道 · 总量不限`;
-    $('board-description').textContent = tab === 'blacklist' ? '自动测试黑名单 + 你的本地黑名单 · 自动名单由服务器维护' : tab === 'all' ? '推荐基础档 50–100 · 观察基础档 0–49 · 最近24小时有效检测决定稳定性折扣' : tab === 'eligible' ? '已通过推荐门槛 · 近24小时轻微 ×0.8，严重 ×0.5' : '未通过推荐门槛，已降至 0–49 分';
+    $('board-description').textContent = tab === 'blacklist' ? '你的本地手动黑名单 · 严重降智不再自动拉黑' : tab === 'all' ? '推荐基础档 50–100 · 观察基础档 0–49 · 最近24小时有效检测决定稳定性折扣' : tab === 'eligible' ? '已通过推荐门槛 · 近24小时轻微 ×0.8，严重 ×0.5' : '未通过推荐门槛，已降至 0–49 分';
     $('live-caption').textContent = `CodeGo 官方状态 · ${result.liveStale || liveError ? '旧数据，待更新' : staticHosting ? '最近采集快照' : '最新返回'} · ${$('auto-refresh').checked && online ? (staticHosting ? '每 60 秒检查快照' : '60 秒自动刷新') : '自动刷新已关'}`;
     $('ttft-heading').textContent = { ttftAvg: '平均 TTFT', ttftP50: 'P50 TTFT', ttftP95: 'P95 TTFT' }[result.config.ttftMetric];
     renderSort();
@@ -372,7 +371,7 @@
   }
   keys.forEach(k => $('weight-' + k).addEventListener('input', e => rebalance(k, Number(e.target.value))));
   $('ttft-metric').addEventListener('change', render);
-  for (const id of ['min-success', 'min-samples', 'min-multiplier']) {
+  for (const id of ['min-success', 'min-samples', 'min-samples-24h', 'min-multiplier']) {
     for (const eventName of ['input', 'change']) $(id).addEventListener(eventName, () => {
       if (id === 'min-multiplier') saveMinimumMultiplier();
       page = 1; priceMessage = ''; render();
@@ -398,7 +397,7 @@
     try { history.replaceState(null, '', url); } catch { /* Offline files may not permit URL updates. */ }
     render();
   });
-  $('reset').addEventListener('click', () => { sortKey = 'score'; sortDirection = 'desc'; page = 1; activePreset = 'balanced'; setWeights(presetWeights.balanced); for (const id of ['min-success', 'min-samples', 'min-multiplier']) $(id).value = 0; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
+  $('reset').addEventListener('click', () => { sortKey = 'score'; sortDirection = 'desc'; page = 1; activePreset = 'balanced'; setWeights(presetWeights.balanced); for (const id of ['min-success', 'min-samples', 'min-samples-24h', 'min-multiplier']) $(id).value = id === 'min-samples-24h' ? RouterRank.defaults.minSamples24h : 0; saveMinimumMultiplier(); $('ttft-metric').value = 'ttftAvg'; priceMessage = ''; render(); });
   for (const name of ['all', 'eligible', 'excluded', 'blacklist']) $('tab-' + name).addEventListener('click', () => { tab = name; page = 1; render(); });
   $('channel-search').value = searchQuery;
   function updateSearch(value) {

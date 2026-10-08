@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const { rank, plan, paginate, sortRows, applyStatus, search } = require('./rank.js');
 const now = Date.UTC(2026, 8, 17, 10);
-const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .20, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
+const make = changes => ({ id: 'a', channelId: '1', source: 'Codex Pro', model: 'gpt-6-astra', multiplier: .20, name: 'test', verified: true, lifecycle: 'active', observing: false, modelStatus: 'healthy', modelRequests: 100, modelWindowHours: 1, groupRequests: 100, success: 99, cache: 85, ttftAvg: 10000, ttftP50: 8000, ttftP95: 20000, ttftSamples: 100, historicalCost: 1, ...changes });
 const snap = rows => ({ rows, capturedAt: new Date(now).toISOString(), complete: true });
 let tests = 0;
 function test(name, fn) { fn(); tests++; console.log('PASS', name); }
@@ -288,5 +288,18 @@ test('Opus 5.5 source selection applies to ranking, search and exported recommen
   assert.equal(rank(s, {model, source:'Gemini'}, now).rows.length, 0);
   assert.equal(rank(s, {...input, blockedKeys:['group:kiro']}, now).rows.length, 0);
 });
+
+
+ test('independent hourly and 24h sample gates and default ten requests', () => {
+  const s = snap([make({id:'nine',groupRequests:9}), make({id:'ten',groupRequests:10,modelRequests:0}), make({id:'unknown',groupRequests:null})]);
+  assert.equal(rank(s,{},now).config.minSamples24h,10);
+  assert.deepEqual(rank(s,{},now).eligible.map(r=>r.id),['ten']);
+  assert.equal(rank(s,{minSamples:1},now).eligible.length,0);
+  assert.equal(rank(s,{minSamples24h:0},now).eligible.length,3);
+  assert.equal(rank(s,{minSamples24h:''},now).eligible.length,3);
+  assert.match(rank(s,{},now).rows.find(r=>r.id==='nine').reasons.join(),/24小时/);
+  assert.match(rank(s,{minSamples:1},now).rows.find(r=>r.id==='ten').reasons.join(),/1小时/);
+  assert.equal(rank(snap([make({modelWindowHours:6})]),{minSamples:1},now).eligible.length,0);
+ });
 
 console.log(`${tests} tests passed`);

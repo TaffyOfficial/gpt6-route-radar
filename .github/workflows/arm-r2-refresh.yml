@@ -19,9 +19,10 @@ jobs:
       - name: Verify ranking and collector
         run: |
           node test-rank.js
+          node test-intelligence.js
           node test-blacklist.js
           node test-prices.js
           node test-r2-upload.mjs
-          python3 -m unittest test_collect.py test_pages.py test_trigger.py
+          python3 -m unittest test_collect.py test_pages.py test_trigger.py test_intelligence.py
       - name: Install collector and refresh R2
         run: sudo /usr/local/sbin/deploy-route-radar

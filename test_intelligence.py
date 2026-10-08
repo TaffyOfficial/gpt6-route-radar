@@ -39,9 +39,10 @@ class Checks(unittest.TestCase):
 
     def test_blacklist_recovery_and_errors(self):
         first = transition({}, 'severe', 't1')
-        self.assertEqual(first['blacklist'], 'temporary')
+        self.assertIsNone(first['blacklist'])
         self.assertEqual(transition(first, 'error', 't2'), first)
-        self.assertEqual(transition(first, 'severe', 't3')['blacklist'], 'permanent')
+        self.assertIsNone(transition(first, 'severe', 't3')['blacklist'])
+        self.assertIsNone(transition({'blacklist':'permanent'}, 'error', 't4')['blacklist'])
         for outcome in ['mild', 'normal']:
             recovered = transition(first, outcome, 't2')
             self.assertIsNone(recovered['blacklist'])
@@ -118,12 +119,12 @@ class Checks(unittest.TestCase):
             return ('severe' if row['channelId'] == 0 else 'normal'), [], None
         with patch('intelligence.candidates', return_value=rows):
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 11)
-            self.assertNotIn(1, calls)
-            self.assertEqual(state['channels']['channel:0']['blacklist'], 'permanent')
+            self.assertEqual(len(calls), 10)
+            self.assertIn(1, calls)
+            self.assertIsNone(state['channels']['channel:0']['blacklist'])
             run_batch({'rows': rows}, None, 'batch1', state, persist=lambda s: None, checker=checker)
-            self.assertEqual(len(calls), 11)
-        self.assertEqual(state['batches']['batch1']['normal'], 10)
+            self.assertEqual(len(calls), 10)
+        self.assertEqual(state['batches']['batch1']['normal'], 9)
 
 class CoverageTests(unittest.TestCase):
     def test_refresh_follows_new_leaders_and_retries_failed_results(self):

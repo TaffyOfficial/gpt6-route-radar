@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const P = require('./prices.js'), R = require('./rank.js');
 const memoryStorage = () => { const data = new Map(); return {getItem:k=>data.get(k)??null, setItem:(k,v)=>data.set(k,v)}; };
 const row = {id:'group-a', channelId:'80', name:'80-Codex Pro-0.2x', model:'gpt-6-astra', source:'Codex Pro', multiplier:.2,
-  verified:true, lifecycle:'active', observing:false, modelStatus:'healthy', modelRequests:100, success:99,
+  verified:true, lifecycle:'active', observing:false, modelStatus:'healthy', modelRequests:100,groupRequests:100, success:99,
   cache:80, ttftAvg:5000, ttftSamples:100, historicalCost:1};
 const now = Date.now();
 const snapshot = rows => ({rows, capturedAt:new Date(now).toISOString(), complete:true});
